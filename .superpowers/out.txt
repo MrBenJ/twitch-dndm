@@ -1,13 +1,14 @@
+$ vitest run
 
  RUN  v5.0.3 /Users/bjunya/code/twitch-dndm
 
 
- Test Files  23 passed (23)
-      Tests  179 passed (179)
-   Start at  14:00:01
-   Duration  983ms (transform 46%, import 37%, tests 16%, worker 1%)
+ Test Files  25 passed (25)
+      Tests  185 passed (185)
+   Start at  14:00:09
+   Duration  946ms (transform 46%, import 36%, tests 17%, worker 2%)
 
-  Transform  transforming modules took 2.33s · 46% of tracked time, re-done on every run
+  Transform  transforming modules took 2.18s · 46% of tracked time, re-done on every run
              persist transforms across runs with fsModuleCache: true
              learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
 
