@@ -1,0 +1,8 @@
+{
+  "name": "@dndm/pack-starter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "@dndm/engine": "workspace:*" },
+  "devDependencies": { "@dndm/pack-loader": "workspace:*" }
+}

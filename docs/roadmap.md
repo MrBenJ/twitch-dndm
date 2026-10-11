@@ -44,56 +44,56 @@ Ground rules:
 Spec: `docs/superpowers/specs/2026-10-11-engine-and-packs-design.md`
 
 Core engine
-- [ ] Game state model (party, characters, monsters, encounter, time)
-- [ ] Injected RNG and clock
-- [ ] Fixed loop: encounter lifecycle, rounds, cooldowns, hold/waiting
-- [ ] Fights: HP, knockouts, idle removal, end conditions
-- [ ] Progression: XP, gold, levels, rewards
-- [ ] Action pipeline with modifier hooks and reaction hooks (chain-depth limit)
-- [ ] Typed event stream (what happened, for screens and logs)
-- [ ] Game commands (spawn, heal, hold, remove, ban…) as one command API
-- [ ] Save / restore of engine state
+- [x] Game state model (party, characters, monsters, encounter, time)
+- [x] Injected RNG and clock
+- [x] Fixed loop: encounter lifecycle, rounds, cooldowns, hold/waiting
+- [x] Fights: HP, knockouts, idle removal, end conditions
+- [x] Progression: XP, gold, levels, rewards
+- [x] Action pipeline with modifier hooks and reaction hooks (chain-depth limit)
+- [x] Typed event stream (what happened, for screens and logs)
+- [x] Game commands (spawn, heal, hold, remove, ban…) as one command API
+- [x] Save / restore of engine state
 
 Plugin slots (registries)
-- [ ] Effects
-- [ ] Statuses (durations, stacking, modifier and reaction hooks)
-- [ ] Targeting rules
-- [ ] Passives
-- [ ] Encounter kinds (fight is built in; others are plugins)
-- [ ] Monster behavior
+- [x] Effects
+- [x] Statuses (durations, stacking, modifier and reaction hooks)
+- [x] Targeting rules
+- [x] Passives
+- [x] Encounter kinds (fight is built in; others are plugins)
+- [x] Monster behavior
 
 Content types (data, schema-checked)
-- [ ] Stats and slots (name, icon, default, growth per level)
-- [ ] Classes (self-contained bundle)
-- [ ] Abilities (cooldown + targeting + effect steps)
-- [ ] Items: gear (slot, stats, passives, grants class) and consumables (use ability, optional uses)
-- [ ] Monsters (stats, abilities, passives, behavior)
-- [ ] Shops (stock, prices, timer, secret)
-- [ ] Events: story beat, vote / decision, treasure / rest, trap / hazard
-- [ ] Adventures (map of encounters, branches lined up for the streamer)
+- [x] Stats and slots (name, icon, default, growth per level)
+- [x] Classes (self-contained bundle)
+- [x] Abilities (cooldown + targeting + effect steps)
+- [x] Items: gear (slot, stats, passives, grants class) and consumables (use ability, optional uses)
+- [x] Monsters (stats, abilities, passives, behavior)
+- [x] Shops (stock, prices, timer, secret)
+- [x] Events: story beat, vote / decision, treasure / rest, trap / hazard
+- [x] Adventures (map of encounters, branches lined up for the streamer)
 
 Packs and channels
-- [ ] Pack format: manifest, code, content, art
-- [ ] Pack loader with dependency, version and reference checks (fail loudly;
+- [x] Pack format: manifest, code, content, art
+- [x] Pack loader with dependency, version and reference checks (fail loudly;
       channel content referencing disabled packs goes dormant)
-- [ ] Channel layering: enabled packs → channel pack → overrides → settings
-- [ ] Dormant content when a pack is off or content is deleted
-- [ ] Channel settings (rev 7 rules + starting items; drowsy, damage variance,
+- [x] Channel layering: enabled packs → channel pack → overrides → settings
+- [x] Dormant content when a pack is off or content is deleted
+- [x] Channel settings (rev 7 rules + starting items; drowsy, damage variance,
       targets per attack and guard priority moved into starter content)
 
 Starter pack (free, open source)
-- [ ] Stats: attack, defense, healing, crit chance, crit multiplier
-- [ ] Effects, statuses (drowsy, guarding), targeting (knocked out is core)
-- [ ] Classes: Fighter, Tank, Healer, with their weapons and abilities
-- [ ] Starter monsters and default monster behavior
-- [ ] Starter shop and consumables
-- [ ] The four event kinds
-- [ ] A sample adventure
+- [x] Stats: attack, defense, healing, crit chance, crit multiplier
+- [x] Effects, statuses (drowsy, guarding), targeting (knocked out is core)
+- [x] Classes: Fighter, Tank, Healer, with their weapons and abilities
+- [x] Starter monsters and default monster behavior
+- [x] Starter shop and consumables
+- [x] The four event kinds
+- [x] A sample adventure
 
 CLI
-- [ ] Play a fight or an adventure in the terminal
-- [ ] Simulate many fights headless (balance checks)
-- [ ] Validate a pack
+- [x] Play a fight or an adventure in the terminal
+- [x] Simulate many fights headless (balance checks)
+- [x] Validate a pack
 
 ## Project 2: Server and live play
 

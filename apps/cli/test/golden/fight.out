@@ -1,0 +1,31 @@
+[    0.0s] A new session begins
+[    0.0s] Fi joins the party
+[    0.0s] Ta joins the party
+[    0.0s] He joins the party
+[    0.0s] Goblin King appears!
+[    0.0s] Fi uses Power Strike
+[    0.0s] Fi hits Goblin King for 9
+[    0.0s] Fi hits Goblin King for 16
+[    0.0s] Ta uses Guard
+[    0.0s] Ta is Guarding
+[    0.0s] He uses Attack
+[    0.0s] He hits Goblin King for 4
+[    8.0s] Ta is no longer Guarding
+[   10.0s] Fi uses Attack
+[   10.0s] Fi hits Goblin King for 11
+[   20.0s] Goblin King uses Club Swing
+[   20.0s] Goblin King hits Fi for 12
+[   20.0s] He uses Heal
+[   20.0s] He heals Ta for 0
+[   40.0s] Goblin King uses Club Swing
+[   40.0s] Goblin King hits Fi for 12
+[   45.0s] Fi uses Attack
+[   45.0s] Fi hits Goblin King for 9
+[   45.0s] ✗ fi: On cooldown (10s) (on-cooldown)
+[   45.0s] Goblin King is held
+[  105.0s] Goblin King is released
+[  105.0s] Fi gets 60 XP and 25 gold
+[  105.0s] Ta gets 60 XP and 25 gold
+[  105.0s] He gets 60 XP and 25 gold
+[  105.0s] The encounter ends (won)
+[  105.0s] The session is over

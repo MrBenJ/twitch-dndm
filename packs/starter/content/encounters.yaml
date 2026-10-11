@@ -1,0 +1,8 @@
+encounter: wandering-merchant
+name: Wandering Merchant
+shop:
+  stock:
+    - { item: health-potion, price: 15 }
+    - { item: smelling-salts, price: 10 }
+    - { item: leather-armor, price: 40 }
+  time: 2m

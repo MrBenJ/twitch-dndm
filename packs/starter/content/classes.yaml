@@ -1,0 +1,20 @@
+class: fighter
+name: Fighter
+description: Hits hard, hits twice.
+icon: art/icons/sword.svg
+stats: { attack: 5 }
+abilities: [attack, power-strike]
+---
+class: tank
+name: Tank
+description: Takes the hits so the party doesn't have to.
+icon: art/icons/shield.svg
+stats: { hp: 60, defense: 10 }
+abilities: [attack, guard]
+---
+class: healer
+name: Healer
+description: Keeps everyone standing.
+icon: art/icons/staff.svg
+stats: { hp: -10, attack: -1, healing: 20 }
+abilities: [attack, heal, revive, cure]

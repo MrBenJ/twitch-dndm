@@ -1,0 +1,41 @@
+[    0.0s] A new session begins
+[    0.0s] Fi joins the party
+[    0.0s] Ta joins the party
+[    0.0s] He joins the party
+[    0.0s] The Cave begins
+[    0.0s] Next up: entrance
+[    0.0s] Story begins
+[   10.0s] The encounter ends (done)
+[   10.0s] Next up: fork
+[   10.0s] Vote begins
+[   40.0s] The encounter ends (left)
+[   40.0s] Next up: goblin-fight
+[   40.0s] Goblin King appears!
+[   40.0s] Fi uses Attack
+[   40.0s] Fi hits Goblin King for 9
+[   40.0s] Ta uses Attack
+[   40.0s] Ta hits Goblin King for 5
+[   40.0s] He uses Attack
+[   40.0s] He hits Goblin King for 4
+[   60.0s] Goblin King uses Yawn
+[   60.0s] He is Drowsy
+[   60.0s] Fi gets 60 XP and 25 gold
+[   60.0s] Ta gets 60 XP and 25 gold
+[   60.0s] He gets 60 XP and 25 gold
+[   60.0s] He gets Health Potion
+[   60.0s] The encounter ends (won)
+[   60.0s] Next up: trap
+[   60.0s] Trap begins
+[   80.0s] Ta takes 14 damage
+[   80.0s] He takes 15 damage
+[   80.0s] The encounter ends (triggered)
+[   80.0s] Next up: treasure
+[   80.0s] Treasure begins
+[   90.0s] He is no longer Drowsy
+[  110.0s] Fi gets 0 XP and 25 gold
+[  110.0s] Fi heals 0
+[  110.0s] He gets 0 XP and 25 gold
+[  110.0s] He heals 15
+[  110.0s] The encounter ends (done)
+[  110.0s] The Cave is complete
+[  110.0s] The session is over

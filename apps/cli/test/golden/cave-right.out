@@ -1,0 +1,38 @@
+[    0.0s] A new session begins
+[    0.0s] Fi joins the party
+[    0.0s] He joins the party
+[    0.0s] The Cave begins
+[    0.0s] Next up: entrance
+[    0.0s] Story begins
+[    0.0s] The encounter ends (done)
+[    0.0s] Next up: fork
+[    0.0s] Vote begins
+[   30.0s] The encounter ends (right)
+[   30.0s] Next up: merchant
+[   30.0s] Shop begins
+[   30.0s] Fi gets 40 gold
+[   30.0s] He gets 40 gold
+[   30.0s] Fi spends 40 gold
+[   30.0s] Fi gets Leather Armor
+[   30.0s] Fi buys starter:leather-armor
+[   30.0s] Fi equips Leather Armor
+[   30.0s] He spends 15 gold
+[   30.0s] He gets Health Potion
+[   30.0s] He buys starter:health-potion
+[   30.0s] He spends 15 gold
+[   30.0s] He gets Health Potion
+[   30.0s] He buys starter:health-potion
+[   30.0s] ✗ he: Not enough gold (not-enough-gold)
+[  150.0s] The encounter ends (closed)
+[  150.0s] Next up: trap
+[  150.0s] Trap begins
+[  170.0s] The encounter ends (disarmed)
+[  170.0s] Next up: treasure
+[  170.0s] He uses Drink Potion
+[  170.0s] He heals He for 0
+[  170.0s] Treasure begins
+[  200.0s] Fi gets 0 XP and 25 gold
+[  200.0s] Fi heals 0
+[  200.0s] The encounter ends (done)
+[  200.0s] The Cave is complete
+[  200.0s] The session is over

@@ -1,0 +1,5 @@
+# The CLI's default channel (spec §7.5). Enables the starter pack.
+packs: [starter]
+settings:
+  class-slot: starter:weapon
+  starting-items: [starter:sword, starter:shield, starter:staff]

@@ -1,0 +1,20 @@
+stat: attack
+name: Attack
+default: 5
+per-level: 1
+---
+stat: defense
+name: Defense
+default: 0
+---
+stat: healing
+name: Healing
+default: 10
+---
+stat: crit-chance
+name: Crit Chance
+default: 5
+---
+stat: crit-multiplier
+name: Crit Multiplier
+default: 2
