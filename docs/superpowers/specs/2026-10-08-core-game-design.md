@@ -1,7 +1,7 @@
 # twitch-dndm — Milestone 1: Core Game Design
 
 **Date:** 2026-10-08
-**Status:** Draft for review (revision 3)
+**Status:** Draft for review (revision 4)
 
 ## 1. Purpose
 
@@ -22,14 +22,14 @@ The original project (`../twitch-emitter`) is a reference for game feel only. No
 - **Monsters fight back.** They damage players, can make them drowsy (longer cooldowns), and can knock them out.
 - **Classes, HP and gear.** A player's equipped weapon decides their class. HP carries over between fights.
 - **Multi-channel from day one.** Any streamer can sign up; every channel is its own world.
-- **Everything is configurable.** Every rule, number, base stat, class, action, item and monster is data in a per-channel **Ruleset** (§4). Rules that change behavior are on/off switches or numbers in the ruleset (§4.9). The one exception is the set of action **effect types** (§4.1): a new kind of ability needs code until the Programmability milestone. The game ships with a default ruleset (three classes, starter gear, starter monsters) as an example; a streamer can change or replace any part of it. Later, content packs are bundles of ruleset pieces.
+- **Everything is configurable.** Every rule, number, base stat, class, action, item and monster is data in a per-channel **Ruleset** (§4). Rules that change behavior are on/off switches or numbers in the ruleset (§4.9). The one exception is the **game vocabulary** (§4.1): effect types, target types, statuses and item slots. Adding a new one needs code until the Programmability milestone. Server protections such as the request rate limit (§12) are not game rules. The game ships with a default ruleset (three classes, starter gear, starter monsters) as an example; a streamer can change or replace any part of it. Later, content packs are bundles of ruleset pieces.
 - **Every streamer action is a named command** (§5), so later Stream Deck buttons and scripts can trigger anything the streamer can do.
 
 ### 1.3 Success criteria
 
 1. dj_teknal can run a full adventure live: start, several fights, end. Viewers join and play from desktop and mobile through the extension, with nothing typed in chat.
 2. A second streamer can sign up, install the extension, and run their own adventure with separate players, ruleset and monsters.
-3. A streamer can change any rule, stat, class, item or monster without a code change (new effect types excepted, §4.1).
+3. A streamer can change any rule, stat, class, item or monster without a code change (the game vocabulary excepted, §4.1).
 4. A server restart in the middle of a fight resumes that fight from its last saved state.
 5. The overlay and extension look finished without any illustrated art.
 
@@ -131,7 +131,16 @@ Each channel has one Ruleset: a single JSON object, validated on every change. E
 | `cure` | which status to remove (`drowsy`) |
 | `guard` | duration, damage reduction %; makes the user a priority monster target when `rules.guardTakesPriority` is on |
 
-Each action has: ID, name, cooldown, target type (`monster`, `self`, `ally`, `knockedOutAlly`), and one or more effects. New effect types need code and belong to the Programmability milestone.
+Each action has: ID, name, cooldown, target type (`monster`, `self`, `ally`, `knockedOutAlly`), and one or more effects.
+
+**Game vocabulary** — fixed in code in this milestone; adding to it belongs to the Programmability milestone:
+
+- effect types: `damage`, `heal`, `revive`, `cure`, `guard`
+- target types: `monster`, `self`, `ally`, `knockedOutAlly`
+- statuses: `drowsy`, `knockedOut`, `guarding`
+- item slots: `weapon`, `armor`
+
+Everything built from the vocabulary (classes, actions, items, numbers) is ruleset data.
 
 **Changing the ruleset:**
 
@@ -149,7 +158,7 @@ Each action has: ID, name, cooldown, target type (`monster`, `self`, `ally`, `kn
   - **fighting**: at least one party member is active.
   - **waiting**: no party member is active (the party is empty, or every member is knocked out — a **wipe**). The monster has no one to attack.
   - It moves from waiting to fighting the moment any member becomes active (a knockout ends, the streamer revives someone, or a player joins). If `rules.fullIntervalAfterWaiting` is on (default), the monster's next attack is scheduled a full interval later; otherwise the original schedule continues.
-- Separately, the streamer can **hold** the monster (`holdMonster`, §5.1). While held, the monster never attacks, in either sub-state, until `releaseMonster`. On release, its next attack is scheduled a full interval later.
+- Separately, the streamer can **hold** the monster (`holdMonster`, §5.1). While held, the monster's attack timer doesn't run, in either sub-state, until `releaseMonster`; the only attack possible is a streamer's `monsterStrikeNow`, which strikes once without releasing the hold or changing the timer. On release, if `rules.fullIntervalAfterRelease` is on (default), the next attack is scheduled a full interval later; otherwise the remaining time from when it was held continues.
 - **The monster attacks on its timer only while the encounter is fighting and the monster is not held.**
 - Everything that applies "during combat" applies in both sub-states and while held.
 
@@ -172,12 +181,12 @@ Each action has: ID, name, cooldown, target type (`monster`, `self`, `ally`, `kn
 
 **Default stats:**
 
-| | Max HP | Damage | Heal power | Crit chance | Crit multiplier |
-|---|---|---|---|---|---|
-| baseStats | 100 | 5 | 10 | 5% | 2× |
-| Fighter modifier | +0 | +5 | +0 | +0 | +0 |
-| Tank modifier | +60 | +0 | +0 | +0 | +0 |
-| Healer modifier | −10 | −1 | +20 | +0 | +0 |
+| | Max HP | Damage | Heal power | Crit chance | Crit multiplier | Damage reduction |
+|---|---|---|---|---|---|---|
+| baseStats | 100 | 5 | 10 | 5% | 2× | 0% |
+| Fighter modifier | +0 | +5 | +0 | +0 | +0 | +0% |
+| Tank modifier | +60 | +0 | +0 | +0 | +0 | +10% |
+| Healer modifier | −10 | −1 | +20 | +0 | +0 | +0% |
 
 (So Fighter 100 HP / 10 dmg, Tank 160 / 5, Healer 90 / 4 with heal power 30.)
 
@@ -256,6 +265,8 @@ When a combat encounter ends:
 | `streamerRemovalWaitsForRest` | on |
 | `guardTakesPriority` | on |
 | `fullIntervalAfterWaiting` | on |
+| `fullIntervalAfterRelease` | on |
+| `fullIntervalAfterRestart` | on |
 | `rewardsRequireAction` | on |
 | `knockedOutExemptFromIdle` | on |
 
@@ -263,7 +274,7 @@ When a combat encounter ends:
 
 Every streamer action is a named command sent to the command API. The dock and sign-up page use it now; Stream Deck and scripts use the same API later.
 
-### 5.1 Game commands (handled by the engine)
+### 5.1 Game commands (game-state changes handled by the engine)
 
 | Area | Commands |
 |---|---|
@@ -276,9 +287,10 @@ Every streamer action is a named command sent to the command API. The dock and s
 | Feed | `postMessage(text)` |
 
 - Each emits an event shown on the overlay feed.
+- `monsterStrikeNow` works in any combat state, including while held (§4.2). It does nothing if no member is active.
 - `spawnMonster` works only while resting during an adventure. `flee` and `endEncounter` end the current combat encounter and apply §4.7.
 - `holdMonster` / `releaseMonster`: see §4.2.
-- `banPlayer` removes the player from the party and blocks them from joining this channel's game. With `alsoBanFromChat`, the server also bans them from the channel's chat using the Twitch Ban User API with the streamer's token. If the streamer hasn't connected chat bans yet (§8), the command fails with an error asking them to connect it; the game ban still applies.
+- `banPlayer` removes the player from the party and blocks them from joining this channel's game; the engine applies this, and it is saved and shown on the feed like any command. With `alsoBanFromChat`, the server then calls the Twitch Ban User API with the streamer's token. The command always succeeds once the game ban is applied; if the chat ban couldn't be done (not connected, or the Twitch call failed), the response includes a warning saying so.
 
 ### 5.2 Admin commands (handled by the server)
 
@@ -287,6 +299,8 @@ Every streamer action is a named command sent to the command API. The dock and s
 | Ruleset | `updateRules(patch)`, `updateBaseStats(patch)`, `updateLevelGrowth(patch)`, `resetRules`, `resetBaseStats`, `resetLevelGrowth`, `replaceRuleset(ruleset)` (JSON import), `resetRuleset` (whole ruleset back to default), `exportRuleset` (returns the ruleset JSON) |
 | Monsters | `createMonster(template)`, `updateMonster(id, patch)`, `deleteMonster(id)`, `uploadMonsterImage(id, file)` (PNG, GIF or WebP, ≤ 2 MB), `removeMonsterImage(id)` |
 | Access | `regenerateDockUrl`, `regenerateOverlayUrl`, `disconnectChatBans` |
+
+Connecting chat bans is the one streamer action that isn't a command: it needs the streamer to log in to Twitch in a browser (§8).
 
 - Every ruleset change is validated (§4.1). Invalid changes are rejected with the list of errors.
 - `uploadMonsterImage` is sent to the command API as a multipart request; every other command is JSON.
@@ -315,12 +329,12 @@ A web page added as an OBS custom browser dock. Tabs:
 
 **Player rows are the source of truth for player progress.** Every change to any field in `players` or `inventory` (XP, gold, level, HP, gear, inventory, knockout-until, flags) is written in the same Room input that caused it, before events are broadcast. This includes streamer commands such as `giveGold` and `healParty`.
 
-**The room snapshot holds only live, non-progress state**: adventure and encounter state, held flag, party membership and join times, monster HP and next attack time, cooldowns, drowsy and guard effects, and who has acted this encounter. It is written:
+**The room snapshot holds only live, non-progress state**: adventure and encounter state, held flag (and remaining time when held), party membership and join times, a copy of the spawned monster's stats (so later edits or deletion of its template don't affect the fight), monster HP and next attack time, cooldowns, drowsy and guard effects, who has acted this encounter, and for each member whether they have been active at any point since joining the encounter (for the §4.7 exemption). It is written:
 
-- immediately after adventure start/end, encounter start/end, join/leave, any streamer command, and a member's first action in an encounter (so the record of who has acted is never lost);
+- immediately after adventure start/end, encounter start/end, join/leave, any streamer command, a member's first action in an encounter, and a member's first moment of being active in an encounter (so the records used at encounter end are never lost);
 - otherwise at most every 10 s while something changed.
 
-**Restart**: on load, the Room reads its snapshot and the player rows. Timestamps are absolute, so effects, knockouts and cooldowns that expired during the downtime are treated as expired. If the encounter is fighting and the monster isn't held, its next attack is scheduled a full interval from the moment of load. Up to ~10 s of snapshot-only state (monster HP, cooldowns, drowsy/guard) can be lost; player progress and who has acted are never lost.
+**Restart**: on load, the Room reads its snapshot and the player rows. Timestamps are absolute, so effects, knockouts and cooldowns that expired during the downtime are treated as expired. If the encounter is fighting and the monster isn't held: with `rules.fullIntervalAfterRestart` on (default), the next attack is scheduled a full interval from the moment of load; with it off, the saved next attack time is kept (an attack due during the downtime happens at load). Up to ~10 s of snapshot-only state (monster HP, cooldowns, drowsy/guard) can be lost; player progress and the encounter-end records are never lost.
 
 ## 7. Real-time updates
 
@@ -362,10 +376,11 @@ Viewers who aren't in the party don't poll. Cooldown countdowns are computed in 
 ## 9. Viewer extension
 
 - Type: video overlay, with a collapsible side panel. On mobile, the same panel fills the chat-area view.
-- **Not joined**: "Join the party" → identity share (first time) → weapon pick (from the player's weapons; class names and icons come from the ruleset).
+- **Not joined**: "Join the party" → identity share (first time) → weapon pick, only for a player with no equipped weapon (from the player's weapons; class names and icons come from the ruleset). Players who already have a weapon join with it.
 - **In party, during combat**: own HP bar, status icons, level, gold; action buttons for the current class with countdowns (greyed out on cooldown or while knocked out); party list (tap a member to target ally actions); monster name, HP, next-attack countdown, and "waiting" / "held" states.
-- **In party, resting**: gear and inventory; change weapon (class) or armor.
+- **In party, resting**: gear and inventory.
 - **Removed, banned, or no adventure**: a short message, and a Rejoin button when §4.3 allows it.
+- **Gear screen**: change weapon (class) or armor. Available in every state where §4.4 allows a gear change for this player, including no adventure, removed, and combat with `gearLockDuringCombat` off. Not shown to banned players.
 - Failed actions show a short message: "On cooldown (4s)", "You're knocked out", "Not in the party".
 - Monster images load from the server's image host, which is added to the extension's allowed domains.
 
@@ -385,13 +400,13 @@ Viewers who aren't in the party don't poll. Cooldown countdowns are computed in 
 ## 12. Reliability and errors
 
 - The server is authoritative: cooldowns, damage and eligibility are always computed server-side.
-- Per-player rate limit: 5 action requests per second; extra requests are rejected. A repeated request ID is ignored (idempotency key).
+- Per-player rate limit (server protection, not a game rule): 5 action requests per second; extra requests are rejected. A repeated request ID is ignored (idempotency key).
 - All inputs to a Room are processed one at a time (§3.2).
 - Errors return a stable error code and a human-readable message. Server errors are logged with channel and player IDs.
 
 ## 13. Testing
 
-- **Engine** (test-first, seeded RNG): every effect type; damage and crits; cooldowns and drowsy; targeting with and without guard; knockout from HP and from chance; knockout expiry and revive; fighting/waiting transitions (wipe, empty party, join while waiting); hold and release in both sub-states; every on/off rule in both positions; weapon on joining; eligibility and idle removal (incl. the knocked-out exemption and mid-fight joins); the join table in §4.3; rewards and drops; levels; every game command; ruleset validation; ruleset changes (allowed timing, missing equipped items, hidden inventory); a custom ruleset with non-default classes.
+- **Engine** (test-first, seeded RNG): every effect type; damage and crits; cooldowns and drowsy; targeting with and without guard; knockout from HP and from chance; knockout expiry and revive; fighting/waiting transitions (wipe, empty party, join while waiting); hold and release in both sub-states; strike-now while held; every on/off rule in both positions; weapon on joining; eligibility and idle removal (incl. the knocked-out exemption and mid-fight joins); the join table in §4.3; rewards and drops; levels; every game command; ruleset validation; ruleset changes (allowed timing, missing equipped items, hidden inventory); a custom ruleset with non-default classes.
 - **Room** (fake clock): timer scheduling, full fight start to finish, input ordering, player-row writes on every progress change, snapshot save triggers, restart and resume.
 - **Server**: JWT verification, dock/overlay token checks and encrypted storage, every admin command, chat-ban connect/disconnect, action endpoints, chat-ban call, PubSub snapshot size and trimming, own-state endpoint.
 - **Simulator** (dev only, in `apps/web`): spawns fake viewers who join and act at random, to test large parties locally.
