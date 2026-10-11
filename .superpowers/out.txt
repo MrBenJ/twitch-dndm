@@ -1,17 +1,13 @@
 
  RUN  v5.0.3 /Users/bjunya/code/twitch-dndm
 
- ❯ packages/engine/test/time.test.ts (8 tests | 5 failed) 22ms
-   ❯ time (8)
-     × ends knockouts with the return HP 2ms
-     × knockouts keep running outside the party and the session 1ms
-     × a knockout ending at the same time as a monster turn ends first 1ms
-     × expires statuses and runs ticks 1ms
-     × a plugin error in a time step skips that timer and keeps going 3ms
+ ❯ packages/engine/test/encounters.test.ts (7 tests | 1 failed) 23ms
+   ❯ encounter kinds (7)
+     × knocked-out members can still respond 5ms
 
-⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
 
- FAIL  packages/engine/test/time.test.ts > time > ends knockouts with the return HP
+ FAIL  packages/engine/test/encounters.test.ts > encounter kinds > knocked-out members can still respond
 Error: not-implemented: Not implemented yet
  ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
      35|     do(cmd: Command): GameEvent[] {
@@ -20,71 +16,13 @@ Error: not-implemented: Not implemented yet
        |                        ^
      38|       game = r.game;
      39|       log.push(...r.events);
- ❯ packages/engine/test/time.test.ts:25:7
+ ❯ packages/engine/test/encounters.test.ts:44:7
 
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
-
- FAIL  packages/engine/test/time.test.ts > time > knockouts keep running outside the party and the session
-Error: not-implemented: Not implemented yet
- ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
-     35|     do(cmd: Command): GameEvent[] {
-     36|       const r = engine.apply(game, cmd, now);
-     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
-       |                        ^
-     38|       game = r.game;
-     39|       log.push(...r.events);
- ❯ packages/engine/test/time.test.ts:34:7
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
-
- FAIL  packages/engine/test/time.test.ts > time > a knockout ending at the same time as a monster turn ends first
-Error: not-implemented: Not implemented yet
- ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
-     35|     do(cmd: Command): GameEvent[] {
-     36|       const r = engine.apply(game, cmd, now);
-     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
-       |                        ^
-     38|       game = r.game;
-     39|       log.push(...r.events);
- ❯ packages/engine/test/time.test.ts:43:7
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
-
- FAIL  packages/engine/test/time.test.ts > time > expires statuses and runs ticks
-Error: not-implemented: Not implemented yet
- ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
-     35|     do(cmd: Command): GameEvent[] {
-     36|       const r = engine.apply(game, cmd, now);
-     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
-       |                        ^
-     38|       game = r.game;
-     39|       log.push(...r.events);
- ❯ packages/engine/test/time.test.ts:56:7
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
-
- FAIL  packages/engine/test/time.test.ts > time > a plugin error in a time step skips that timer and keeps going
-AssertionError: expected [ { type: 'core:plugin-error', …(3) } ] to have a length of 2 but got 1
-
-- Expected
-+ Received
-
-- 2
-+ 1
-
- ❯ packages/engine/test/time.test.ts:70:66
-     68|     h.open(); h.join('al'); h.spawn('tp:glitch');
-     69|     const events = h.wait(31000);
-     70|     expect(events.filter((e) => e.type === 'core:plugin-error')).toHav…
-       |                                                                  ^
-     71|     expect(h.fight().nextTurnAt).toBe(45000);
-     72|   });
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
 
 
- Test Files  1 failed (1)
-      Tests  5 failed | 3 passed (8)
-   Start at  13:59:10
-   Duration  299ms (transform 62%, import 26%, tests 11%, worker 1%)
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 failed | 9 passed (10)
+   Start at  13:59:32
+   Duration  400ms (transform 68%, import 24%, tests 7%, worker 1%)
 

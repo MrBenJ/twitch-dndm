@@ -111,9 +111,19 @@ export function finishEncounter(rt: Runtime, outcome: string): void {
   }
 }
 
-/** Filled in by Task 6. */
-export function respond(_rt: Runtime, _id: string, _input: unknown): void {
-  throw new Rejection('Not implemented yet', 'not-implemented');
+export function respond(rt: Runtime, id: string, input: unknown): void {
+  rt.requireChar(id);
+  const s = rt.game.session;
+  if (!s) throw new Rejection('No session is open', 'no-session');
+  const enc = s.encounter;
+  if (!enc || isFight(enc)) throw new Rejection("There's nothing to respond to", 'nothing-to-respond');
+  if (!s.party.includes(id)) throw new Rejection('Not in the party', 'not-in-party');
+  const kind = rt.reg.kinds.get(enc.kind)!;
+  const nctx = runtimeNormalizeCtx(rt, kind.pack);
+  const value = normalizeParams(kind.def.input ?? p.object({}), input ?? {}, nctx);
+  if (nctx.issues.length) throw new Rejection(nctx.issues[0]!, 'invalid-input');
+  enc.state = callPlugin(kind.pack, `${kind.id} respond`, () =>
+    kind.def.respond(makeCtx(rt, kind.pack), enc.state, charRef(id), value, enc.params));
 }
 
 export function kindWake(rt: Runtime): void {
