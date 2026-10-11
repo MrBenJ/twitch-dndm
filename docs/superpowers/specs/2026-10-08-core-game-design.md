@@ -1,7 +1,7 @@
 # twitch-dndm — Milestone 1: Core Game Design
 
 **Date:** 2026-10-08
-**Status:** Draft for review (revision 5)
+**Status:** Draft for review (revision 6)
 
 ## 1. Purpose
 
@@ -157,8 +157,8 @@ Everything built from the vocabulary (classes, actions, items, numbers) is rules
 - A combat encounter is in one of two sub-states:
   - **fighting**: at least one party member is active.
   - **waiting**: no party member is active (the party is empty, or every member is knocked out — a **wipe**). The monster has no one to attack.
-  - It moves from waiting to fighting the moment any member becomes active (a knockout ends, the streamer revives someone, or a player joins). If `rules.fullIntervalAfterWaiting` is on (default), the monster's next attack is scheduled a full interval later; otherwise the original schedule continues.
-- Separately, the streamer can **hold** the monster (`holdMonster`, §5.1). While held, the monster's attack timer doesn't run, in either sub-state, until `releaseMonster`; the only attack possible is a streamer's `monsterStrikeNow`, which strikes once without releasing the hold or changing the timer. On release, if `rules.fullIntervalAfterRelease` is on (default), the next attack is scheduled a full interval later; otherwise the remaining time from when it was held continues.
+  - It moves from waiting to fighting the moment any member becomes active (a knockout ends, the streamer revives someone, or a player joins). If the monster isn't held: with `rules.fullIntervalAfterWaiting` on (default), the monster's next attack is scheduled a full interval later; otherwise the original schedule continues. If the monster is held, nothing is scheduled; the release rule below decides.
+- Separately, the streamer can **hold** the monster (`holdMonster`, §5.1). While held, the monster's attack timer doesn't run, in either sub-state, until `releaseMonster`; the only attack possible is a streamer's `monsterStrikeNow`, which strikes once without releasing the hold or changing the timer. On release, if the encounter is fighting: with `rules.fullIntervalAfterRelease` on (default), the next attack is scheduled a full interval later; with it off, the remaining time from when it was held continues if an attack timer was running at that moment, and otherwise the next attack is a full interval later. If the encounter is waiting at release, nothing is scheduled until it becomes fighting (then the waiting rule above applies).
 - **The monster attacks on its timer only while the encounter is fighting and the monster is not held.**
 - Everything that applies "during combat" applies in both sub-states and while held.
 
@@ -350,9 +350,10 @@ A web page added as an OBS custom browser dock. Tabs:
 
 - Twitch limits: 5 KB per message; about 1 message per second per channel.
 - The server sends a compact snapshot to the channel's broadcast topic at most once per second, only when state changed.
-- Contents: adventure/encounter state (incl. fighting/waiting and held), monster (name, image URL and stats from the spawned copy, HP, max HP, next attack time, last strike time), party entries as `[playerKey, classId, hpPercent, statusFlags]`, and a `rosterVersion` number.
+- Contents: adventure/encounter state (incl. fighting/waiting and held), monster (name, image URL and stats from the spawned copy, HP, max HP, next attack time, last strike time), party entries as `[playerKey, classId, hpPercent, statusFlags]`, a `rosterVersion` number, and a **changed list**: the keys of every player (in the party or not) whose own state (§7.3) changed since the previous snapshot, for any reason — their actions, allies' actions, monster attacks, streamer commands, or timers expiring. If the changed list doesn't fit in the size limit, it is replaced by a `refreshAll` flag.
+- A change to any player's own state counts as a state change, so it always produces a snapshot (within the 1-per-second limit).
 - Names and gear are not in the snapshot. When `rosterVersion` changes, the extension fetches the roster (player keys → names, classes, levels) over HTTP.
-- **Trimming**: if a snapshot would exceed 5 KB (only with a very large party), it lists only the first party members by join order plus a `partyTotal` count. The snapshot is used only for showing the party and monster; no viewer relies on it for their own state (§7.3).
+- **Trimming**: if a snapshot would exceed 5 KB (only with a very large party), the changed list is kept (or replaced by `refreshAll`) and party entries are trimmed to the first members by join order plus a `partyTotal` count. Party entries are used only for showing the party; no viewer relies on them for their own state (§7.3) or for choosing ally targets (§9).
 
 ### 7.3 A viewer's own state
 
@@ -361,12 +362,9 @@ Every viewer who has shared identity fetches their own state (HP, status, cooldo
 - on load, after joining, and after each gear change (party members and non-members alike);
 - in the response to each of their own actions.
 
-Party members also fetch it:
+- when their key is in a snapshot's changed list, or the snapshot has `refreshAll` (with a random 0–1 s delay to spread requests, longer for `refreshAll`).
 
-- when the snapshot's monster `last strike time` changes (with a random 0–1 s delay to spread requests);
-- every 5 s while the encounter is fighting and the monster isn't held.
-
-Only party members poll; nobody polls while waiting, held, resting or with no adventure. Cooldown countdowns are computed in the browser from end times sent by the server.
+There is no timed polling. Cooldown countdowns are computed in the browser from end times sent by the server.
 
 ## 8. Auth and identity
 
@@ -382,7 +380,7 @@ Only party members poll; nobody polls while waiting, held, resting or with no ad
 
 - Type: video overlay, with a collapsible side panel. On mobile, the same panel fills the chat-area view.
 - **Not joined**: "Join the party" → identity share (first time) → weapon pick, only for a player with no equipped weapon (from the player's weapons; class names and icons come from the ruleset). Players who already have a weapon join with it.
-- **In party, during combat**: own HP bar, status icons, level, gold; action buttons for the current class with countdowns (greyed out on cooldown or while knocked out); party list (tap a member to target ally actions); monster name, HP, next-attack countdown, and "waiting" / "held" states.
+- **In party, during combat**: own HP bar, status icons, level, gold; action buttons for the current class with countdowns (greyed out on cooldown or while knocked out); party list (from the snapshot); **target picker** for ally actions: when opened, the extension fetches the full party's HP and status over HTTP, listing knocked-out and most-hurt members first, so every member can be targeted even when the snapshot is trimmed; monster name, HP, next-attack countdown, and "waiting" / "held" states.
 - **In party, resting**: gear and inventory.
 - **Removed, banned, or no adventure**: a short message, and a Rejoin button when §4.3 allows it.
 - **Gear screen**: change weapon (class) or armor. Available in every state where §4.4 allows a gear change for this player, including no adventure, removed, and combat with `gearLockDuringCombat` off. Not shown to banned players.
@@ -413,6 +411,6 @@ Only party members poll; nobody polls while waiting, held, resting or with no ad
 
 - **Engine** (test-first, seeded RNG): every effect type; damage and crits; cooldowns and drowsy; targeting with and without guard; knockout from HP and from chance; knockout expiry and revive; fighting/waiting transitions (wipe, empty party, join while waiting); hold and release in both sub-states; strike-now while held; every on/off rule in both positions; weapon on joining; eligibility and idle removal (incl. the knocked-out exemption and mid-fight joins); the join table in §4.3; rewards and drops; levels; every game command; ruleset validation; ruleset changes (allowed timing, missing equipped items, hidden inventory); a custom ruleset with non-default classes.
 - **Room** (fake clock): timer scheduling, full fight start to finish, input ordering, player-row writes on every progress change, snapshot save triggers, restart and resume.
-- **Server**: JWT verification, dock/overlay token checks and encrypted storage, every admin command, chat-ban connect/disconnect, action endpoints, chat-ban call, PubSub snapshot size and trimming, own-state endpoint.
+- **Server**: JWT verification, dock/overlay token checks and encrypted storage, every admin command, chat-ban connect/disconnect, action endpoints, chat-ban call, PubSub snapshot size, trimming and the changed list / `refreshAll` fallback, own-state endpoint, full-party endpoint for the target picker.
 - **Simulator** (dev only, in `apps/web`): spawns fake viewers who join and act at random, to test large parties locally.
 - **Manual**: Twitch local test mode for the real extension on desktop and mobile.
