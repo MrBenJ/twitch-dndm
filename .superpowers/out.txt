@@ -1,19 +1,32 @@
 
  RUN  v5.0.3 /Users/bjunya/code/twitch-dndm
 
- ❯ packages/engine/test/session.test.ts (12 tests | 5 failed) 23ms
-   ❯ sessions (2)
-     × closing during a fight ends it as ended with no rewards 3ms
-   ❯ joining (8)
-     × follows the join table for normal, removed and banned characters 1ms
-     × allowJoinMidFight off blocks joining fights 1ms
-     × removed players may rejoin a fight when waits-for-rest is off 1ms
+ ❯ packages/engine/test/gear.test.ts (4 tests | 4 failed) 18ms
+   ❯ gear (4)
+     × equips owned items, locks during fights, unlocks after 14ms
+     × gearLockDuringCombat off allows swaps mid-fight; non-gear and class slot rules 1ms
+     × a gear change that lowers max HP caps saved HP; a rise does not heal 1ms
+     × banned characters cannot change gear; characters outside a session can 1ms
+ ❯ packages/engine/test/session.test.ts (12 tests | 1 failed) 26ms
    ❯ the API (2)
-     × never mutates the caller and rejects unknown characters 3ms
+     × never mutates the caller and rejects unknown characters 4ms
+ ❯ packages/engine/test/fight.test.ts (17 tests | 9 failed) 34ms
+   ❯ character abilities (3)
+     × checks party, knockout, ownership, phase and cooldown 4ms
+     × canUse modifiers can refuse 1ms
+     × consumables spend uses, then the item 1ms
+   ❯ monster turns and sub-states (6)
+     × acts on its interval and hits ceil(active/5) members 3ms
+     × goes waiting on a wipe and fighting again, with a full interval by default 1ms
+     × keeps the original schedule when fullIntervalAfterWaiting is off 1ms
+   ❯ ending a fight (6)
+     × pays eligible members, removes idle ones, keeps the knocked-out-whole-time 1ms
+     × knockedOutExemptFromIdle off removes knocked-out idlers 0ms
+     × healBetweenFights heals the party except knocked out members 1ms
 
-⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+⎯⎯⎯⎯⎯⎯ Failed Tests 14 ⎯⎯⎯⎯⎯⎯⎯
 
- FAIL  packages/engine/test/session.test.ts > sessions > closing during a fight ends it as ended with no rewards
+ FAIL  packages/engine/test/fight.test.ts > character abilities > checks party, knockout, ownership, phase and cooldown
 Error: not-implemented: Not implemented yet
  ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
      35|     do(cmd: Command): GameEvent[] {
@@ -22,12 +35,11 @@ Error: not-implemented: Not implemented yet
        |                        ^
      38|       game = r.game;
      39|       log.push(...r.events);
- ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
- ❯ packages/engine/test/session.test.ts:18:31
+ ❯ packages/engine/test/fight.test.ts:37:7
 
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/14]⎯
 
- FAIL  packages/engine/test/session.test.ts > joining > follows the join table for normal, removed and banned characters
+ FAIL  packages/engine/test/fight.test.ts > character abilities > canUse modifiers can refuse
 Error: not-implemented: Not implemented yet
  ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
      35|     do(cmd: Command): GameEvent[] {
@@ -36,12 +48,11 @@ Error: not-implemented: Not implemented yet
        |                        ^
      38|       game = r.game;
      39|       log.push(...r.events);
- ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
- ❯ packages/engine/test/session.test.ts:61:31
+ ❯ packages/engine/test/fight.test.ts:46:7
 
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/14]⎯
 
- FAIL  packages/engine/test/session.test.ts > joining > allowJoinMidFight off blocks joining fights
+ FAIL  packages/engine/test/fight.test.ts > character abilities > consumables spend uses, then the item
 Error: not-implemented: Not implemented yet
  ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
      35|     do(cmd: Command): GameEvent[] {
@@ -50,54 +61,165 @@ Error: not-implemented: Not implemented yet
        |                        ^
      38|       game = r.game;
      39|       log.push(...r.events);
- ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
- ❯ packages/engine/test/session.test.ts:80:31
+ ❯ packages/engine/test/fight.test.ts:53:7
 
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/14]⎯
 
- FAIL  packages/engine/test/session.test.ts > joining > removed players may rejoin a fight when waits-for-rest is off
-Error: not-implemented: Not implemented yet
- ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
-     35|     do(cmd: Command): GameEvent[] {
-     36|       const r = engine.apply(game, cmd, now);
-     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
-       |                        ^
-     38|       game = r.game;
-     39|       log.push(...r.events);
- ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
- ❯ packages/engine/test/session.test.ts:86:31
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
-
- FAIL  packages/engine/test/session.test.ts > the API > never mutates the caller and rejects unknown characters
-AssertionError: expected { ok: false, error: { …(2) } } to deeply equal { ok: false, error: { …(2) } }
+ FAIL  packages/engine/test/fight.test.ts > monster turns and sub-states > acts on its interval and hits ceil(active/5) members
+AssertionError: expected [] to have a length of 2 but got +0
 
 - Expected
 + Received
 
-  {
-    "error": {
--     "code": "unknown-character",
--     "message": "Unknown character",
-+     "code": "not-implemented",
-+     "message": "Not implemented yet",
-    },
-    "ok": false,
-  }
+- 2
++ 0
 
- ❯ packages/engine/test/session.test.ts:106:15
-    104|     const before = structuredClone(h.game);
-    105|     const r = h.engine.apply(h.game, { type: 'use', character: 'ghost'…
+ ❯ packages/engine/test/fight.test.ts:72:17
+     70|     h.wait(15000);
+     71|     const hit = Object.values(h.game.characters).filter((c) => c.hp ==…
+     72|     expect(hit).toHaveLength(2);
+       |                 ^
+     73|     expect(h.fight().nextTurnAt).toBe(30000);
+     74|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/14]⎯
+
+ FAIL  packages/engine/test/fight.test.ts > monster turns and sub-states > goes waiting on a wipe and fighting again, with a full interval by default
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/fight.test.ts:79:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/14]⎯
+
+ FAIL  packages/engine/test/fight.test.ts > monster turns and sub-states > keeps the original schedule when fullIntervalAfterWaiting is off
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/fight.test.ts:88:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/14]⎯
+
+ FAIL  packages/engine/test/fight.test.ts > ending a fight > pays eligible members, removes idle ones, keeps the knocked-out-whole-time
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/fight.test.ts:129:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/14]⎯
+
+ FAIL  packages/engine/test/fight.test.ts > ending a fight > knockedOutExemptFromIdle off removes knocked-out idlers
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/fight.test.ts:152:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/14]⎯
+
+ FAIL  packages/engine/test/fight.test.ts > ending a fight > healBetweenFights heals the party except knocked out members
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/fight.test.ts:172:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/14]⎯
+
+ FAIL  packages/engine/test/gear.test.ts > gear > equips owned items, locks during fights, unlocks after
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/gear.test.ts:9:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/14]⎯
+
+ FAIL  packages/engine/test/gear.test.ts > gear > gearLockDuringCombat off allows swaps mid-fight; non-gear and class slot rules
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/gear.test.ts:22:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/14]⎯
+
+ FAIL  packages/engine/test/gear.test.ts > gear > a gear change that lowers max HP caps saved HP; a rise does not heal
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/gear.test.ts:31:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/14]⎯
+
+ FAIL  packages/engine/test/gear.test.ts > gear > banned characters cannot change gear; characters outside a session can
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ packages/engine/test/gear.test.ts:43:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/14]⎯
+
+ FAIL  packages/engine/test/session.test.ts > the API > never mutates the caller and rejects unknown characters
+AssertionError: expected 'not-implemented' to be 'unknown-character' // Object.is equality
+
+Expected: "unknown-character"
+Received: "not-implemented"
+
+ ❯ packages/engine/test/session.test.ts:108:85
     106|     expect(r).toEqual({ ok: false, error: { code: 'unknown-character',…
-       |               ^
     107|     expect(h.game).toEqual(before);
     108|     expect(h.fail({ type: 'healPlayer', character: 'ghost', amount: 'f…
+       |                                                                                     ^
+    109|   });
+    110|
 
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/14]⎯
 
 
- Test Files  1 failed (1)
-      Tests  5 failed | 7 passed (12)
-   Start at  13:58:33
-   Duration  290ms (transform 60%, import 27%, tests 12%, worker 1%)
+ Test Files  3 failed (3)
+      Tests  14 failed | 19 passed (33)
+   Start at  13:58:50
+   Duration  381ms (transform 62%, import 27%, tests 10%, worker 1%)
 
