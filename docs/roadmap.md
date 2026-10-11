@@ -82,7 +82,7 @@ Packs and channels
       targets per attack and guard priority moved into starter content)
 
 Starter pack (free, open source)
-- [ ] Stats: attack, defense, healing power
+- [ ] Stats: attack, defense, healing, crit chance, crit multiplier
 - [ ] Effects, statuses (drowsy, guarding), targeting (knocked out is core)
 - [ ] Classes: Fighter, Tank, Healer, with their weapons and abilities
 - [ ] Starter monsters and default monster behavior
@@ -104,7 +104,8 @@ Carries over most of spec rev 7 (`docs/superpowers/specs/2026-10-08-core-game-de
 - [ ] Command API (game and admin), shared by dock, chat and later Stream Deck
 - [ ] Real time: WebSocket to dock and overlay, Extension PubSub to viewers
 - [ ] Twitch auth: extension JWT, identity share, dock/overlay tokens
-- [ ] Chat bot (join via chat), opt-in chat bans
+- [ ] Optional, quiet chat bot per channel (join via chat), opt-in chat bans.
+      Rev 7's "no chat bot" was for its milestone; settle this in the Project 2 spec
 - [ ] Media uploads (monster images, story beat images and video)
 - [ ] Reliability: restart recovery, snapshots
 

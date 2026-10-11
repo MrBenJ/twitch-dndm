@@ -1,7 +1,7 @@
 # twitch-dndm — Project 1: Engine and Packs
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 4)
+**Status:** Draft for owner review (revision 5)
 **Roadmap:** `docs/roadmap.md`, Project 1
 **Replaces:** the game rules in `2026-10-08-core-game-design.md` (rev 7) §4 and §5.1. The rest of rev 7 is the starting point for Project 2 (server and live play).
 
@@ -23,7 +23,7 @@ The original hand-coded game (`../twitch-emitter`) is a reference for game feel 
 3. **HP is the only core stat.** Packs register every other stat.
 4. **Plugins never edit game state directly.** They call engine operations (§5.2), so every change produces an event and passes through its modifier point if it has one (§5.4). One stated exception: an encounter kind's own state (vote tallies, claims, §6.7), which only that kind reads and writes.
 5. **Determinism.** The engine and all pack code use only the engine's seeded RNG and the `now` passed in. The same packs, channel config, seed and command list always produce the same events.
-6. **Only official packs contain code**, because there is no sandbox for other people's code yet. Official packs are defined in §5.1: the pack loader accepts code only from this repository's `packs/`; callers of the engine (tests, and later the server) are trusted. Content made by a streamer (the channel pack, §7.2) is data only.
+6. **Only official packs contain code**, because there is no sandbox for other people's code yet. Official packs are defined in §5.1: packs made and shipped by this project, which the pack loader accepts code from only in this repository's `packs/`; callers of the engine (tests, and later the server) are trusted. Content made by a streamer (the channel pack, §7.2) is data only.
 
 ### 1.2 Success criteria
 
@@ -113,7 +113,7 @@ packs/starter/
 - `depends` maps pack IDs to semver ranges, e.g. `{ "starter": "^1.0.0" }`.
 - The pack loader reads the folder and hands the engine a **pack bundle**: manifest, `register` function and parsed content documents. The engine never touches the disk.
 - A data-only pack has no `src/`.
-- **Official packs:** the pack loader is the only way packs come in from outside the code base, and it treats only the folders in this repository's `packs/` as official. Anyone writing a pack with code puts it there. The loader marks each bundle `official` or not, and `createEngine` refuses a non-official bundle that has a `register` function. Non-official packs may be data-only.
+- **Official packs:** the pack loader is the only way packs come in from outside the code base, and it treats only the folders in this repository's `packs/` as official. Official means made and shipped by this project: `packs/` holds only code reviewed and merged into this repository. Other people's code doesn't go there until there is a sandbox. The loader marks each bundle `official` or not, and `createEngine` refuses a non-official bundle that has a `register` function. Non-official packs may be data-only.
 - `createEngine` trusts its caller. Code that calls it directly (the engine's own tests, and later the Project 2 server, which loads packs through the loader) may build official bundles in code; this is how test packs (§14) are made. Signed paid packs come later.
 
 ### 5.2 Registering plugins
@@ -129,7 +129,7 @@ packs/starter/
 | `api.behavior(id, def)` | A monster behavior: `params`, `act(ctx, { monster, params })` |
 | `api.encounterKind(id, def)` | An encounter kind (§6.7) |
 
-Content documents in `content/` (§8), including stats and slots, are registered automatically by the loader. Plugin params may have defaults in code, but every number the starter pack uses is written in its content, so overrides (§7.3) reach all of them.
+Content documents (§8), including stats and slots, are part of the bundle. The loader only reads them from `content/`; `createEngine` registers them, whether the bundle came from the loader or was built in code. Plugin params may have defaults in code, but every number the starter pack uses is written in its content, so overrides (§7.3) reach all of them.
 
 **Operations on `ctx`** (the only way a plugin changes the game):
 
@@ -203,7 +203,7 @@ Numbers in content can be formulas, written as text: `power: 1.5 * attack + 2`.
 - `hp`, `hp.max`, `level`, and the same with `target.`.
 - Functions: `min`, `max`, `floor`, `ceil`, `round`, `random(a, b)` (a decimal between a and b, from the engine RNG).
 - No other names, no assignment, no loops. The engine parses formulas itself and never evaluates code.
-- Every formula is parsed when content is validated. Unknown names and syntax errors are validation errors.
+- Every formula is parsed when content is validated. Syntax errors are validation errors. Stat names in formulas are references: an unknown name is a validation error unless it's a dormant case (§7.4).
 - A formula used where there is no source (trap penalties, §9.6) may only use numbers, `target.` names and functions.
 
 ## 6. The fixed loop
@@ -245,7 +245,7 @@ A character is per (channel, viewer) and keeps: name, level, XP, gold, current H
 
 ### 6.5 Fights (`core:fight`)
 
-Started by `spawnMonster(monsterId)` or as an adventure node. The monster is copied from its content when the fight starts, so later content changes don't affect a running fight.
+Started by `startEncounter` with a fight (an encounter document or inline `fight: <monster>`), by its shorthand `spawnMonster(monsterId)`, or as an adventure node. The monster is copied from its content when the fight starts, so later content changes don't affect a running fight.
 
 **Sub-states:**
 
@@ -337,11 +337,11 @@ The CLI renders both as text. Adding a widget is an engine change plus a screen 
 
 - `engine.advance(game, now)` processes everything due up to `now` in time order: status expiry and ticks, knockout ends, monster turns, encounter-kind wakes.
 - `engine.nextWakeTime(game)` returns the earliest due time, or null.
-- `engine.resume(game, now)` is called after loading a saved game. Time is frozen while the game isn't running: nothing acts during the downtime.
+- `engine.resume(game, now)` is called after loading a saved game. Timers are absolute times and keep running while the game isn't running, but nothing acts during the downtime.
   - Things that end, end: expired knockouts first (which may turn waiting into fighting), then expired statuses and cooldowns.
   - Encounter-kind wakes that fell due run once (a vote whose time ran out closes now).
   - Monster turns and status ticks that fell due are not replayed.
-  - Then, for a fight that's fighting and not held, `fullIntervalAfterRestart` alone decides the next monster turn: on, a full interval from now; off, the saved time (a turn due during the downtime happens now).
+  - Then, for a fight that's fighting and not held, `fullIntervalAfterRestart` alone decides the next monster turn: on, a full interval from now; off, the saved time; if that time passed during the downtime, exactly one monster turn happens now and any other missed turns are skipped.
 
 ## 7. Channels
 
@@ -375,7 +375,7 @@ overrides:
 
 ### 7.4 Dormant content
 
-Content is **dormant** when its pack is off, or when it was deleted from the channel pack. The channel pack keeps a list of the IDs deleted from it, so a deletion can be told apart from a typo.
+Content is **dormant** when its pack is off, when it was deleted from the channel pack, or when it refers to dormant content (this spreads through every chain of references). The channel pack keeps a list of the IDs deleted from it, so a deletion can be told apart from a typo.
 
 - **Dormant references are warnings, not errors.** These go dormant instead of failing validation:
   - channel-pack content that refers to a pack that isn't enabled, or to channel content that is dormant or on the deleted list (the referring content becomes dormant too);
@@ -388,7 +388,7 @@ Content is **dormant** when its pack is off, or when it was deleted from the cha
 - Dormant inventory items are shown as unavailable and can't be used, equipped or given.
 - A dormant equipped item counts as empty. If it was in the class slot, the character's effective class item is the first resolvable starting item for that slot, if any.
 - Statuses and cooldowns that refer to dormant content are ignored while dormant.
-- When the content resolves again, everything returns as it was, apart from slots the character changed. While max HP is lower because of dormancy, the HP used is capped (§6.2). Saved HP changes only through damage, healing, and the character's own gear changes (§6.2), each of which saves the capped value.
+- When the content resolves again, everything returns as it was, apart from slots the character changed. While max HP is lower because of dormancy, the HP used is capped (§6.2). Dormancy by itself never writes HP, but every HP change does: damage, healing, revives, returning from a knockout and the character's own gear changes all save the resulting (capped) value. So HP is an exception to "everything returns as it was": HP changed while content was dormant stays as it was saved.
 - **Changing a running game:** `engine.adopt(game)` re-checks a saved game against the engine's current channel config. It's rejected with `content-in-use` if the running encounter or a lined-up adventure uses content that no longer resolves. When a streamer may change packs or content mid-session is decided in Project 2.
 
 ### 7.5 Settings
@@ -638,7 +638,7 @@ Run by `createEngine` and `dndm validate`. Each error names the pack, file, docu
 - Every content document matches its type's schema, and every plugin's params match the plugin's `params` schema.
 - Every reference resolves (stats, slots, classes, abilities, items, monsters, effects, statuses, passives, targeting rules, behaviors, encounter kinds, encounters, adventure nodes), in every pack, the channel pack, settings and overrides. The only exceptions are the dormant cases in §7.4, which are warnings.
 - A pack refers only to itself, the core, and packs in its `depends`.
-- Every formula parses and names only known stats (and follows the no-source rule where it applies).
+- Every formula parses and names only known stats, apart from dormant cases (§7.4), and follows the no-source rule where it applies.
 - Every adventure node is reachable from `start`, and every `next` map key other than `default` is `ended` or an outcome of that node's kind.
 - Non-official packs have no code (§5.1).
 - Settings are in range (durations positive, percentages 0–100%, multipliers ≥ 0).
@@ -726,5 +726,5 @@ Time in the CLI is **stepped**: it moves only on `wait <duration>` or `next` (ju
 - **Starter pack:** each class, ability, plugin and encounter kind behaves as §9 says. The sample adventure runs to its end on each branch.
 - **Golden replays:** recorded `dndm run` scripts with their expected event output. A behavior change shows up as a diff.
 - **Determinism:** each golden replay run twice gives identical output.
-- **No special treatment:** a test collects every starter-pack ID and fails if any appears as a string literal in `packages/engine/src`.
+- **No special treatment:** a test collects every starter-pack ID and fails if any appears as a string literal anywhere in `packages/engine`, tests included. Engine test packs use their own made-up IDs.
 - **CI:** `dndm validate --packs packs/*` on every change.
