@@ -1,28 +1,13 @@
 
  RUN  v5.0.3 /Users/bjunya/code/twitch-dndm
 
- ❯ packages/engine/test/encounters.test.ts (7 tests | 1 failed) 23ms
-   ❯ encounter kinds (7)
-     × knocked-out members can still respond 5ms
 
-⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  20 passed (20)
+      Tests  168 passed (168)
+   Start at  13:59:43
+   Duration  883ms (transform 48%, import 36%, tests 15%, worker 2%)
 
- FAIL  packages/engine/test/encounters.test.ts > encounter kinds > knocked-out members can still respond
-Error: not-implemented: Not implemented yet
- ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
-     35|     do(cmd: Command): GameEvent[] {
-     36|       const r = engine.apply(game, cmd, now);
-     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
-       |                        ^
-     38|       game = r.game;
-     39|       log.push(...r.events);
- ❯ packages/engine/test/encounters.test.ts:44:7
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
-
-
- Test Files  1 failed | 1 passed (2)
-      Tests  1 failed | 9 passed (10)
-   Start at  13:59:32
-   Duration  400ms (transform 68%, import 24%, tests 7%, worker 1%)
+  Transform  transforming modules took 2.09s · 48% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
 
