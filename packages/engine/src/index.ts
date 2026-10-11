@@ -8,3 +8,7 @@ export { EngineError, formatIssue, PluginError, Rejection, ValidationError, type
 export type { Settings } from './channel';
 export type { Description } from './describe';
 export { formatDuration, parseDuration, parsePercent } from './units';
+export type { Command } from './commands';
+export type { ApplyResult } from './engine';
+export type { GameEvent } from './events';
+export type { GameState, Character, FightState, KindEncounterState, MonsterState, SessionState, StatusInstance } from './state';

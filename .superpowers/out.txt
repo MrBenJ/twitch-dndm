@@ -1,9 +1,103 @@
 
  RUN  v5.0.3 /Users/bjunya/code/twitch-dndm
 
+ ❯ packages/engine/test/session.test.ts (12 tests | 5 failed) 23ms
+   ❯ sessions (2)
+     × closing during a fight ends it as ended with no rewards 3ms
+   ❯ joining (8)
+     × follows the join table for normal, removed and banned characters 1ms
+     × allowJoinMidFight off blocks joining fights 1ms
+     × removed players may rejoin a fight when waits-for-rest is off 1ms
+   ❯ the API (2)
+     × never mutates the caller and rejects unknown characters 3ms
 
- Test Files  2 passed (2)
-      Tests  22 passed (22)
-   Start at  13:58:10
-   Duration  276ms (transform 55%, import 32%, tests 12%, worker 1%)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/engine/test/session.test.ts > sessions > closing during a fight ends it as ended with no rewards
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
+ ❯ packages/engine/test/session.test.ts:18:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  packages/engine/test/session.test.ts > joining > follows the join table for normal, removed and banned characters
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
+ ❯ packages/engine/test/session.test.ts:61:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  packages/engine/test/session.test.ts > joining > allowJoinMidFight off blocks joining fights
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
+ ❯ packages/engine/test/session.test.ts:80:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  packages/engine/test/session.test.ts > joining > removed players may rejoin a fight when waits-for-rest is off
+Error: not-implemented: Not implemented yet
+ ❯ Object.do packages/engine/test/helpers/harness.ts:37:24
+     35|     do(cmd: Command): GameEvent[] {
+     36|       const r = engine.apply(game, cmd, now);
+     37|       if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`…
+       |                        ^
+     38|       game = r.game;
+     39|       log.push(...r.events);
+ ❯ Object.spawn packages/engine/test/helpers/harness.ts:63:43
+ ❯ packages/engine/test/session.test.ts:86:31
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  packages/engine/test/session.test.ts > the API > never mutates the caller and rejects unknown characters
+AssertionError: expected { ok: false, error: { …(2) } } to deeply equal { ok: false, error: { …(2) } }
+
+- Expected
++ Received
+
+  {
+    "error": {
+-     "code": "unknown-character",
+-     "message": "Unknown character",
++     "code": "not-implemented",
++     "message": "Not implemented yet",
+    },
+    "ok": false,
+  }
+
+ ❯ packages/engine/test/session.test.ts:106:15
+    104|     const before = structuredClone(h.game);
+    105|     const r = h.engine.apply(h.game, { type: 'use', character: 'ghost'…
+    106|     expect(r).toEqual({ ok: false, error: { code: 'unknown-character',…
+       |               ^
+    107|     expect(h.game).toEqual(before);
+    108|     expect(h.fail({ type: 'healPlayer', character: 'ghost', amount: 'f…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  5 failed | 7 passed (12)
+   Start at  13:58:33
+   Duration  290ms (transform 60%, import 27%, tests 12%, worker 1%)
 
