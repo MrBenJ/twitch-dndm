@@ -1,14 +1,36 @@
-$ vitest run
 
  RUN  v5.0.3 /Users/bjunya/code/twitch-dndm
 
+ ❯ packages/pack-loader/test/loader.test.ts (6 tests | 1 failed) 18ms
+   ❯ repo helpers (2)
+     × finds the repo and its packs 5ms
 
- Test Files  25 passed (25)
-      Tests  185 passed (185)
-   Start at  14:00:09
-   Duration  946ms (transform 46%, import 36%, tests 17%, worker 2%)
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
 
-  Transform  transforming modules took 2.18s · 46% of tracked time, re-done on every run
-             persist transforms across runs with fsModuleCache: true
-             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+ FAIL  packages/pack-loader/test/loader.test.ts > repo helpers > finds the repo and its packs
+AssertionError: expected [] to deeply equal [ Array(1) ]
+
+- Expected
++ Received
+
+- [
+-   "/Users/bjunya/code/twitch-dndm/packs/starter",
+- ]
++ []
+
+ ❯ packages/pack-loader/test/loader.test.ts:61:28
+     59|   it('finds the repo and its packs', () => {
+     60|     expect(repoRoot()).toMatch(/twitch-dndm$/);
+     61|     expect(listPackDirs()).toEqual([join(repoRoot(), 'packs', 'starter…
+       |                            ^
+     62|   });
+     63|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 passed (6)
+   Start at  14:00:33
+   Duration  163ms (transform 37%, import 32%, tests 27%, worker 4%)
 
