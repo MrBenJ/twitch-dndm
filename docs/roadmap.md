@@ -38,6 +38,8 @@ Ground rules:
 
 ## Project 1: Engine and packs (no UI)
 
+Spec: `docs/superpowers/specs/2026-10-11-engine-and-packs-design.md`
+
 Core engine
 - [ ] Game state model (party, characters, monsters, encounter, time)
 - [ ] Injected RNG and clock
@@ -90,7 +92,7 @@ CLI
 
 ## Project 2: Server and live play
 
-Carries over most of spec rev 7 (§3, §6, §7, §8, §12).
+Carries over most of spec rev 7 (`docs/superpowers/specs/2026-10-08-core-game-design.md` §3, §6, §7, §8, §12).
 
 - [ ] Always-on Node server, a Room per channel, RoomManager, timers
 - [ ] Postgres via Drizzle: players, channels, packs enabled, channel pack, overrides

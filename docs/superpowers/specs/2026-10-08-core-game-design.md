@@ -3,6 +3,8 @@
 **Date:** 2026-10-08
 **Status:** Ready for owner review (revision 7)
 
+> **Superseded in part (2026-10-11).** The game rules (§4) and game commands (§5.1) are replaced by `2026-10-11-engine-and-packs-design.md` (Project 1). The rest of this document is the starting point for Project 2 (server and live play) and will be revised to match the modular engine.
+
 ## 1. Purpose
 
 twitch-dndm is a from-scratch rebuild and evolution of the author's earlier hand-coded Twitch dungeon game. The whole audience works together as a party to fight monsters the streamer spawns at their own pace. The streamer uses it to run a live adventure and tell a story; viewers take part through a Twitch Extension rather than typing in chat.
