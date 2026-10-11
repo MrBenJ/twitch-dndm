@@ -1,10 +1,9 @@
-$ vitest run
 
  RUN  v5.0.3 /Users/bjunya/code/twitch-dndm
 
 
- Test Files  12 passed (12)
-      Tests  93 passed (93)
-   Start at  13:57:32
-   Duration  367ms (transform 52%, import 31%, tests 14%, worker 3%)
+ Test Files  2 passed (2)
+      Tests  22 passed (22)
+   Start at  13:58:10
+   Duration  276ms (transform 55%, import 32%, tests 12%, worker 1%)
 
