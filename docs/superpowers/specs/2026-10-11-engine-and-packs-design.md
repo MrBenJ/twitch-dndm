@@ -1,7 +1,7 @@
 # twitch-dndm — Project 1: Engine and Packs
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 2)
+**Status:** Draft for owner review (revision 3)
 **Roadmap:** `docs/roadmap.md`, Project 1
 **Replaces:** the game rules in `2026-10-08-core-game-design.md` (rev 7) §4 and §5.1. The rest of rev 7 is the starting point for Project 2 (server and live play).
 
@@ -113,7 +113,7 @@ packs/starter/
 - `depends` maps pack IDs to semver ranges, e.g. `{ "starter": "^1.0.0" }`.
 - The pack loader reads the folder and hands the engine a **pack bundle**: manifest, `register` function and parsed content documents. The engine never touches the disk.
 - A data-only pack has no `src/`.
-- **Official packs** are the folders in this repository's `packs/`, plus any folder passed to the CLI with `--dev-pack` (which prints a warning that its code will run). The loader marks each bundle `official` or not, and `createEngine` refuses a non-official bundle that has a `register` function. Non-official packs may be data-only. Signed paid packs come later.
+- **Official packs** are the folders in this repository's `packs/`, and nothing else. Anyone writing a pack with code puts it there. The loader marks each bundle `official` or not, and `createEngine` refuses a non-official bundle that has a `register` function. Non-official packs may be data-only. Signed paid packs come later.
 
 ### 5.2 Registering plugins
 
@@ -123,7 +123,7 @@ packs/starter/
 |---|---|
 | `api.stat(id, def)` | A stat: `name`, `icon`, `default`, `per-level` |
 | `api.slot(id, def)` | An equipment slot: `name` |
-| `api.effect(id, def)` | An effect: `params` schema, `apply(ctx, { source, target, params })` |
+| `api.effect(id, def)` | An effect: `params` schema, `apply(ctx, { source, target, params })`. `source` is null when there is none (trap penalties, §9.6) |
 | `api.status(id, def)` | A status: `name`, `icon`, `params`, `stacking`, `modify`, `react`, optional `tick` |
 | `api.passive(id, def)` | A passive: `name`, `params`, `modify`, `react` |
 | `api.targeting(id, def)` | A targeting rule: `params`, `select(ctx, { user, ability, params, chosen, hints })` |
@@ -144,6 +144,8 @@ Content documents in `content/` are registered automatically by the loader.
 | `removeStatus(target, statusId)` | Removes a status |
 | `useAbility(user, abilityId, { chosen, hints })` | Uses an ability (for behaviors and reactions) |
 | `giveRewards(character, { xp, gold, items })` | Pays rewards, applying the XP and gold multipliers |
+| `spendGold(character, amount)` | Lowers gold by exactly `amount`; rejects the command ("Not enough gold") if they can't afford it |
+| `giveItem(character, item, count?)` | Adds items to the inventory, with no multipliers |
 | `endEncounter(outcome)` | Ends the current encounter (encounter kinds only) |
 | `emit(type, data, text)` | Emits a custom event. `type` is pack-prefixed; `text` is a feed line |
 | `setStore(entity, data)` | Replaces the calling pack's store on an entity (for pack resources such as mana); emits `core:store-changed` |
@@ -175,6 +177,8 @@ Content documents in `content/` are registered automatically by the loader.
 | `canUse` | user | `true`, or a short reason string that rejects an ability use |
 
 Damage and healing amounts are rounded to the nearest whole number after all modifiers, minimum 0.
+
+When an operation has no source, source-side modifiers (`damageDealt`, `healingGiven`) and reactions sent to the source are skipped.
 
 **Reactions** run after something happened. A reaction gets the event and its holder's role in it (`source`, `target` or `present`).
 
@@ -211,14 +215,14 @@ Numbers in content can be formulas, written as text: `power: 1.5 * attack + 2`.
 
 ### 6.2 Characters
 
-A character is per (channel, viewer) and keeps: name, level, XP, gold, current HP, inventory (full item ID → count), equipped items (slot → full item ID), statuses, cooldowns (ability → end time), knockout end time, banned flag, "removed by streamer" flag, and pack stores (§5.2).
+A character is per (channel, viewer) and keeps: name, level, XP, gold, current HP, inventory (full item ID → count), equipped items (slot → full item ID), statuses, cooldowns (ability → end time), remaining uses of consumables in use (§8.3), knockout end time, banned flag, "removed by streamer" flag, and pack stores (§5.2).
 
 - An equipped item is one of the items the character owns: equipping doesn't take it out of the inventory, and replacing it in a slot leaves it in the inventory.
 - **Starting items** (`settings.startingItems`) are owned by every character for as long as they are listed. They aren't stored in the inventory.
-- **Class:** a character's class is the class granted by the item equipped in the **class slot** (`settings.classSlot`), if any. A character with nothing there has no class: they keep any abilities from gear and consumables. The engine works with zero classes defined.
+- **Class:** a character's class is the class granted by their effective item in the **class slot** (`settings.classSlot`): the equipped item, or the fallback in §7.4 if it's dormant. A character with no effective item there has no class: they keep any abilities from gear and consumables. The engine works with zero classes defined.
 - **Abilities available** to a character: their class's abilities, then abilities on equipped items, then the use ability of each consumable they own.
 - **Stats:** a stat's value is its `default + per-level × (level − 1)`, plus class and equipped-gear bonuses, then the `stat` modifier.
-- Whenever a character's max HP drops below their current HP, current HP is lowered to the new max. A rise in max HP (gear, level) doesn't raise current HP.
+- **HP and max HP:** the HP the game uses is the lower of the saved current HP and max HP. When the character changes gear or levels and max HP drops below their current HP, the saved current HP is lowered to the new max. A rise in max HP doesn't raise current HP. Dormancy never writes HP (§7.4).
 
 ### 6.3 Joining and leaving
 
@@ -229,14 +233,14 @@ A character is per (channel, viewer) and keeps: name, level, XP, gold, current H
 | Banned | no | no | no |
 
 - No one can join while no session is open. The party is full when it has `partyCap` members (default: no cap).
-- **Class on joining:** a character whose class slot is empty (including a slot whose stored item is dormant, §7.4), and who owns at least one usable item for that slot, must pick one with the join command. One who already has an item there joins with it.
+- **Class on joining:** a character whose **effective** class item (§7.4) is empty, and who owns at least one usable item for that slot, must pick one with the join command. One with an effective class item joins with it. (A character whose stored item is dormant gets the first resolvable starting item as their effective item, so they're asked to pick only when there's no such starting item.)
 - `leave` removes a character from the party. It counts as "left" in the table.
 - "Removed by the streamer" clears when the party is next resting, if `streamerRemovalWaitsForRest` is on.
 
 ### 6.4 Gear
 
 - `equip(item)` requires an owned, resolvable item (§7.4) whose slot exists. `unequip(slot)` empties a slot; the class slot can't be emptied, only swapped.
-- During a fight, characters in the party can't change gear if `gearLockDuringCombat` is on. Banned characters can't change gear. Characters not in a session can change gear.
+- During a fight, characters in the party can't change gear if `gearLockDuringCombat` is on. Banned characters can't change gear, at any time. Other characters not in a session can change gear.
 
 ### 6.5 Fights (`core:fight`)
 
@@ -258,7 +262,7 @@ Started by `spawnMonster(monsterId)` or as an adventure node. The monster is cop
 
 | Outcome | Caused by | Rewards |
 |---|---|---|
-| `won` | monster HP reaches 0, or `endEncounter(won)` | yes |
+| `won` | the monster is knocked out (HP reaches 0, or an effect knocks it out, §6.6), or `endEncounter(won)` | yes |
 | `fled` | `flee` | no |
 | `ended` | `endEncounter(ended)` or `closeSession` | no |
 
@@ -374,11 +378,11 @@ Content is **dormant** when it can't be resolved: its pack is off, or it was del
   - overrides for them (§7.3).
 - References inside an enabled official pack (to itself, the core, or a pack it depends on) must resolve; those are errors (§10).
 
-- Saved state is never rewritten because of dormancy. Characters keep dormant items in their inventory and in their equipped slots. A character's own action can still change a slot: equipping, or picking on join, replaces the dormant item in that slot, and the dormant item stays in the inventory.
+- Saved state is never rewritten because of dormancy. Characters keep dormant items in their inventory and in their equipped slots. A character's own action can still change a slot: equipping, or picking on join (§6.3), replaces the dormant item in that slot, and the dormant item stays in the inventory.
 - Dormant inventory items are shown as unavailable and can't be used, equipped or given.
 - A dormant equipped item counts as empty. If it was in the class slot, the character's effective class item is the first resolvable starting item for that slot, if any.
 - Statuses and cooldowns that refer to dormant content are ignored while dormant.
-- When the content resolves again, everything returns as it was, apart from slots the character changed. One more exception: if max HP was lower while dormant, the HP lost to that cap stays lost (§6.2).
+- When the content resolves again, everything returns as it was, apart from slots the character changed. While max HP is lower because of dormancy, the HP used is capped (§6.2); saved HP changes only through real HP changes (damage, healing), which save the new value.
 - **Changing a running game:** `engine.adopt(game)` re-checks a saved game against the engine's current channel config. It's rejected with `content-in-use` if the running encounter or a lined-up adventure uses content that no longer resolves. When a streamer may change packs or content mid-session is decided in Project 2.
 
 ### 7.5 Settings
@@ -536,7 +540,7 @@ Slots: `weapon` (the default class slot) and `armor`.
 
 | Type | ID | Does |
 |---|---|---|
-| Effect | `damage` | `power` formula; crit roll on the source's crit stats; × (1 − target defense%); `ctx.dealDamage` |
+| Effect | `damage` | `power` formula; crit roll on the source's crit stats (no crit without a source); × (1 − target defense%); `ctx.dealDamage` |
 | Effect | `heal` | `amount` formula; `ctx.heal` |
 | Effect | `revive` | `hp` as % of the target's max; only on knocked-out targets |
 | Effect | `apply-status` | `status`, `duration`, status params |
@@ -597,7 +601,7 @@ All three use `targets-per: 5` and set `crit-chance: 0` (monster hits don't crit
 | `shop` | `stock: [{ item, price }]`, `time?`, `secret?` | `shop-list`; `respond: { buy: item }` | at `time`, or when the streamer ends it | `closed` |
 
 - A secret shop shows no overlay scene, and only members who were in the party when it opened can see it or buy.
-- Buying costs gold and adds the item to the inventory. Starting items can't be bought.
+- Buying calls `ctx.spendGold` then `ctx.giveItem`, and emits `starter:purchased`. Starting items can't be bought.
 - The streamer's `endEncounter` on a vote uses the current leader (`endEarly`); on a trap it counts as `disarmed`.
 
 ### 9.7 Sample adventure
@@ -659,7 +663,7 @@ engine.describe()                                     // everything registered, 
 
 ### 11.3 Events
 
-Every event has `type`, `at` and `text` (a one-line feed message). Core event types cover: sessions, joins and leaves, removals and bans, encounter start and end (with outcome), fight sub-state changes, hold and release, ability use, damage, healing, knockouts and revives, statuses applied and ended, rewards, level-ups, item purchases, adventure progress (lined up, started, finished, stopped), `core:reaction-limit`, and each streamer command. Packs add their own with `ctx.emit`.
+Every event has `type`, `at` and `text` (a one-line feed message). Core event types cover: sessions, joins and leaves, removals and bans, encounter start and end (with outcome), fight sub-state changes, hold and release, ability use, damage, healing, knockouts and revives, statuses applied and ended, rewards, level-ups, gold spent, items given, pack store changes (`core:store-changed`), adventure progress (lined up, started, finished, stopped), `core:reaction-limit`, and each streamer command. Packs add their own with `ctx.emit`.
 
 ## 12. Art
 
@@ -673,12 +677,12 @@ Time in the CLI is **stepped**: it moves only on `wait <duration>` or `next` (ju
 
 | Command | Does |
 |---|---|
-| `dndm validate [--packs dirs] [--dev-pack dir] [--channel file]` | Validates packs (and a channel config) and lists every error |
-| `dndm play [--packs dirs] [--dev-pack dir] [--channel file] [--seed n] [--save file]` | Interactive: type viewer and streamer commands, `wait`, `next`, `state`, `help`; shows events, widgets and scenes as text |
-| `dndm run <script.jsonl> [--packs …] [--channel …] [--seed n]` | Runs a script and prints every event |
-| `dndm sim --party <classes> --vs <monster> [--runs n] [--seed n]` | Runs many fights with bot players; reports win rate, fight length, knockouts and damage and healing by ability |
+| `dndm validate [--packs dirs] [--channel file]` | Validates packs (and a channel config) and lists every error |
+| `dndm play [--packs dirs] [--channel file] [--seed n] [--save file]` | Interactive: type viewer and streamer commands, `wait`, `next`, `state`, `help`; shows events, widgets and scenes as text |
+| `dndm run <script.jsonl> [--packs dirs] [--channel file] [--seed n]` | Runs a script and prints every event |
+| `dndm sim --party <classes> --vs <monster> [--packs dirs] [--channel file] [--runs n] [--seed n]` | Runs many fights with bot players; reports win rate, fight length, knockouts and damage and healing by ability |
 
-- `--packs` takes folders; a folder outside this repository's `packs/` is loaded as non-official (data only). `--dev-pack` loads one folder as official, with a warning.
+- `--packs` takes folders; a folder outside this repository's `packs/` is loaded as non-official (data only). Without `--packs`, every folder in `packs/` is loaded.
 - Every command takes `--json`, which prints machine-readable output (one JSON object per line).
 - A script line is `{ "wait": "3s" }`, `{ "next": true }`, or `{ "as": "streamer" | "<character>", "command": { … } }`.
 - `dndm play --save` writes the game state and a script of everything typed, so any session can be replayed.

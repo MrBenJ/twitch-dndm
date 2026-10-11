@@ -31,8 +31,9 @@ Ground rules:
   is data only. Third-party code waits for a sandbox.
 - Pack code runs only on the server. The extension and overlay render data.
 - Plugins use the engine's RNG and clock. Never `Math.random` or `Date.now`.
-- IDs are namespaced (`starter:sword`). Every reference is checked at load;
-  references to a pack that's off go dormant instead of failing.
+- IDs are namespaced (`starter:sword`). Every reference is checked at load.
+  A pack may only reference packs it depends on (hard requirements). Channel
+  content that references a pack that's off goes dormant instead of failing.
 - When a pack is turned off, its items go dormant: kept, greyed out, and back
   when it is turned on again.
 - Adventures line up the next encounter. The streamer always presses go.
@@ -73,10 +74,11 @@ Content types (data, schema-checked)
 Packs and channels
 - [ ] Pack format: manifest, code, content, art
 - [ ] Pack loader with dependency, version and reference checks (fail loudly;
-      references to disabled packs go dormant)
+      channel content referencing disabled packs goes dormant)
 - [ ] Channel layering: enabled packs → channel pack → overrides → settings
 - [ ] Dormant content when a pack is off or content is deleted
-- [ ] Channel settings (rev 7 rules + starting items)
+- [ ] Channel settings (rev 7 rules + starting items; drowsy, damage variance,
+      targets per attack and guard priority moved into starter content)
 
 Starter pack (free, open source)
 - [ ] Stats: attack, defense, healing power
