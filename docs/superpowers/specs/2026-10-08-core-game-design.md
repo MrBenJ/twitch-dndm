@@ -1,7 +1,7 @@
 # twitch-dndm — Milestone 1: Core Game Design
 
 **Date:** 2026-10-08
-**Status:** Draft for review (revision 2)
+**Status:** Draft for review (revision 3)
 
 ## 1. Purpose
 
@@ -22,14 +22,14 @@ The original project (`../twitch-emitter`) is a reference for game feel only. No
 - **Monsters fight back.** They damage players, can make them drowsy (longer cooldowns), and can knock them out.
 - **Classes, HP and gear.** A player's equipped weapon decides their class. HP carries over between fights.
 - **Multi-channel from day one.** Any streamer can sign up; every channel is its own world.
-- **Everything is configurable.** Every rule, number, base stat, class, action, item and monster is data in a per-channel **Ruleset** (§4). The game ships with a default ruleset (three classes, starter gear, starter monsters) as an example; a streamer can change or replace any part of it. Later, content packs are bundles of ruleset pieces.
+- **Everything is configurable.** Every rule, number, base stat, class, action, item and monster is data in a per-channel **Ruleset** (§4). Rules that change behavior are on/off switches or numbers in the ruleset (§4.9). The one exception is the set of action **effect types** (§4.1): a new kind of ability needs code until the Programmability milestone. The game ships with a default ruleset (three classes, starter gear, starter monsters) as an example; a streamer can change or replace any part of it. Later, content packs are bundles of ruleset pieces.
 - **Every streamer action is a named command** (§5), so later Stream Deck buttons and scripts can trigger anything the streamer can do.
 
 ### 1.3 Success criteria
 
 1. dj_teknal can run a full adventure live: start, several fights, end. Viewers join and play from desktop and mobile through the extension, with nothing typed in chat.
 2. A second streamer can sign up, install the extension, and run their own adventure with separate players, ruleset and monsters.
-3. A streamer can change any rule, stat, class, item or monster without a code change.
+3. A streamer can change any rule, stat, class, item or monster without a code change (new effect types excepted, §4.1).
 4. A server restart in the middle of a fight resumes that fight from its last saved state.
 5. The overlay and extension look finished without any illustrated art.
 
@@ -42,7 +42,7 @@ The original project (`../twitch-emitter`) is a reference for game feel only. No
 - `apps/web`: streamer sign-up page, control dock, stream overlay, dev-only simulator.
 - `apps/extension`: Twitch Extension viewer UI (video overlay type, mobile view).
 - The default ruleset.
-- In the dock: form editors for rules, base stats and monsters (with optional image upload); a JSON editor with import/export for the whole ruleset (classes and items included).
+- In the dock: form editors for rules, base stats, level growth and monsters (with optional image upload); a JSON editor with import/export for the whole ruleset (classes and items included).
 
 ### 2.2 Out of scope (later milestones)
 
@@ -118,7 +118,7 @@ Each channel has one Ruleset: a single JSON object, validated on every change. E
 - **levelGrowth**: stat gains per level, and the XP curve.
 - **classes**: each class has an ID, name, icon, stat modifiers (added to base stats) and a list of actions.
 - **items**: each item has an ID, name, slot (weapon or armor), class ID (weapons only; equipping it sets that class), and stat bonuses.
-- **starterItems**: items every player owns permanently and can't lose.
+- **starterItems**: item IDs every player owns automatically for as long as the item is listed here. An item listed in `starterItems` can't be deleted from `items`; it must first be removed from `starterItems`.
 - **monsters**: monster templates (§4.6).
 
 **Actions** are built from a fixed set of effect types, so a class can combine them freely:
@@ -129,15 +129,15 @@ Each channel has one Ruleset: a single JSON object, validated on every change. E
 | `heal` | amount as a multiple of the player's heal power |
 | `revive` | HP restored, % of the target's max HP |
 | `cure` | which status to remove (`drowsy`) |
-| `guard` | duration, damage reduction %; makes the user a priority monster target |
+| `guard` | duration, damage reduction %; makes the user a priority monster target when `rules.guardTakesPriority` is on |
 
 Each action has: ID, name, cooldown, target type (`monster`, `self`, `ally`, `knockedOutAlly`), and one or more effects. New effect types need code and belong to the Programmability milestone.
 
 **Changing the ruleset:**
 
 - `rules`, `baseStats`, `levelGrowth` and `monsters` can change at any time. Changes apply to the next calculation that uses them; cooldowns already running and a monster already spawned keep their values.
-- `classes`, `items` and `starterItems` can change only when no adventure is running.
-- If a player's equipped item no longer exists, they are re-equipped with the first starter weapon. Inventory entries for items that no longer exist are kept but hidden and unusable (they reappear if the item is restored).
+- `classes`, `items` and `starterItems` can change only when no adventure is running. `replaceRuleset` and `resetRuleset` change these sections too, so they are also rejected while an adventure is running.
+- If a player's equipped weapon no longer exists, they are re-equipped with the first starter weapon. If their equipped armor no longer exists, the armor slot becomes empty. Inventory entries for items that no longer exist are kept but hidden and unusable (they reappear if the item is restored).
 - A ruleset must contain at least one class and at least one starter weapon; otherwise it is rejected.
 
 ### 4.2 Lifecycle
@@ -146,22 +146,26 @@ Each action has: ID, name, cooldown, target type (`monster`, `self`, `ally`, `kn
 - **Encounter** (a "round"): one unit within an adventure. In this milestone the only encounter type is **combat**: it runs from `spawnMonster` until the monster is defeated, the party flees, or the streamer ends it. Later milestones add **event** encounters (shops), which never cause removal.
 - Only one encounter runs at a time. Between encounters the party is **resting**.
 - A combat encounter is in one of two sub-states:
-  - **fighting**: at least one party member is active. The monster attacks on its timer.
-  - **paused**: no party member is active (the party is empty, or every member is knocked out — a **wipe**). The monster's attack timer stops.
-  - It moves from paused to fighting the moment any member becomes active (a knockout ends, the streamer revives someone, or a player joins), and the monster's next attack is scheduled a full interval later.
-- Everything that applies "during combat" applies in both sub-states.
+  - **fighting**: at least one party member is active.
+  - **waiting**: no party member is active (the party is empty, or every member is knocked out — a **wipe**). The monster has no one to attack.
+  - It moves from waiting to fighting the moment any member becomes active (a knockout ends, the streamer revives someone, or a player joins). If `rules.fullIntervalAfterWaiting` is on (default), the monster's next attack is scheduled a full interval later; otherwise the original schedule continues.
+- Separately, the streamer can **hold** the monster (`holdMonster`, §5.1). While held, the monster never attacks, in either sub-state, until `releaseMonster`. On release, its next attack is scheduled a full interval later.
+- **The monster attacks on its timer only while the encounter is fighting and the monster is not held.**
+- Everything that applies "during combat" applies in both sub-states and while held.
 
 ### 4.3 Players
 
 - A player record is per (channel, Twitch user). A viewer has an independent character in every channel.
-- Joining requires the viewer to share their Twitch identity with the extension (once), then pick a weapon from their items.
+- Joining requires the viewer to share their Twitch identity with the extension (once).
 - Who can join when:
 
 | Situation | While resting | During combat |
 |---|---|---|
 | New player, or removed for being idle | yes | yes, if `rules.allowJoinMidFight` (default on) |
-| Removed by the streamer (`removePlayer`) | yes | no — must wait until no combat encounter is running |
+| Removed by the streamer (`removePlayer`) | yes | only if `rules.streamerRemovalWaitsForRest` is off (default on: must wait until no combat encounter is running) |
 | Banned (`banPlayer`) | no | no |
+
+- **Weapon on joining**: a player who has never equipped a weapon picks one when they join, at any time. A player who already has an equipped weapon joins with it; they can change it only when gear changes are allowed (§4.4).
 
 - Party size cap: `rules.partyCap`, default 50.
 - **Active** = in the party and not knocked out.
@@ -184,7 +188,7 @@ Each action has: ID, name, cooldown, target type (`monster`, `self`, `ally`, `kn
 
 - Two slots: **weapon** (sets class) and **armor**.
 - Default starter items: Sword (Fighter), Shield (Tank), Staff (Healer). Other items come from monster drops or streamer gifts.
-- Gear can be changed only while resting (or when no adventure is running), never during combat.
+- Gear can be changed while resting or when no adventure is running. During combat it is locked if `rules.gearLockDuringCombat` is on (default).
 - If a gear change lowers max HP, current HP is capped at the new max. Raising max HP doesn't raise current HP.
 
 ### 4.5 Actions and cooldowns
@@ -210,7 +214,7 @@ A monster template has: name, optional image, max HP, damage per hit, attack int
 **Monster attack** (every attack interval while fighting):
 
 1. Number of targets: the template's value, or automatic = `ceil(activeMembers / rules.membersPerTarget)` (default 5), minimum 1.
-2. Choose targets: guarding members first (random order among them), then random other active members, until the count is reached or no one is left.
+2. Choose targets: if `rules.guardTakesPriority` is on (default), guarding members first (random order among them); then random other active members, until the count is reached or no one is left.
 3. Each target takes the monster's damage, reduced by their damage reduction and any guard. Then, independently: roll drowsy chance → drowsy; roll knockout chance → knocked out.
 4. A player whose HP reaches 0 is knocked out.
 5. The overlay and extension show a countdown to the next attack.
@@ -224,9 +228,9 @@ When a combat encounter ends:
 - **Won** (monster HP reaches 0, or streamer `endEncounter(withRewards: true)`): rewards go to eligible members.
 - **Fled / ended without rewards**: no rewards.
 
-**Eligible** = in the party when the encounter ended and performed at least one action during it.
+**Eligible** = in the party when the encounter ended and, if `rules.rewardsRequireAction` is on (default), performed at least one action during it.
 
-**Idle removal** (`rules.autoRemoveIdle`, default on): at the end of every combat encounter, members who performed no action during it are removed from the party. Exemption: a member who was knocked out for the whole time they were in the encounter stays in the party (but isn't eligible). A member who joined mid-fight is judged from when they joined. Removed players keep all progress.
+**Idle removal** (`rules.autoRemoveIdle`, default on): at the end of every combat encounter, members who performed no action during it are removed from the party. Exemption (if `rules.knockedOutExemptFromIdle` is on, default): a member who was knocked out for the whole time they were in the encounter stays in the party (but isn't eligible when `rewardsRequireAction` is on). A member who joined mid-fight is judged from when they joined. Removed players keep all progress.
 
 ### 4.8 Rewards and progression
 
@@ -248,6 +252,12 @@ When a combat encounter ends:
 | `knockoutDuration` / `knockoutReturnHpPercent` | 60 s / 25% |
 | `damageVarianceMin` / `damageVarianceMax` | 1.0 / 1.2 |
 | `xpMultiplier` / `goldMultiplier` | 1.0 / 1.0 |
+| `gearLockDuringCombat` | on |
+| `streamerRemovalWaitsForRest` | on |
+| `guardTakesPriority` | on |
+| `fullIntervalAfterWaiting` | on |
+| `rewardsRequireAction` | on |
+| `knockedOutExemptFromIdle` | on |
 
 ## 5. Streamer commands
 
@@ -261,42 +271,41 @@ Every streamer action is a named command sent to the command API. The dock and s
 | Encounter | `spawnMonster(monsterId)`, `endEncounter(withRewards: bool)`, `flee` |
 | Healing | `healPlayer(player, amount \| full)`, `healParty`, `revivePlayer(player)`, `reviveAll` |
 | Effects | `applyDrowsy(player)`, `knockOut(player)`, `cure(player)` |
-| Monster | `monsterStrikeNow`, `pauseMonster`, `resumeMonster`, `setMonsterHp(value)` |
+| Monster | `monsterStrikeNow`, `holdMonster`, `releaseMonster`, `setMonsterHp(value)` |
 | Rewards | `giveXp(target, amount)`, `giveGold(target, amount)`, `giveItem(target, itemId)` (target = player or party) |
 | Feed | `postMessage(text)` |
 
 - Each emits an event shown on the overlay feed.
 - `spawnMonster` works only while resting during an adventure. `flee` and `endEncounter` end the current combat encounter and apply §4.7.
-- `pauseMonster` stops the attack timer until `resumeMonster`, in either combat sub-state.
-- `banPlayer` removes the player from the party and blocks them from joining this channel's game. With `alsoBanFromChat`, the server also bans them from the channel's chat using the Twitch Ban User API with the streamer's token (§8).
+- `holdMonster` / `releaseMonster`: see §4.2.
+- `banPlayer` removes the player from the party and blocks them from joining this channel's game. With `alsoBanFromChat`, the server also bans them from the channel's chat using the Twitch Ban User API with the streamer's token. If the streamer hasn't connected chat bans yet (§8), the command fails with an error asking them to connect it; the game ban still applies.
 
 ### 5.2 Admin commands (handled by the server)
 
 | Area | Commands |
 |---|---|
-| Ruleset | `updateRules(patch)`, `updateBaseStats(patch)`, `updateLevelGrowth(patch)`, `replaceRuleset(ruleset)` (JSON import), `resetRuleset` (back to default) |
-| Monsters | `createMonster(template)`, `updateMonster(id, patch)`, `deleteMonster(id)`, `setMonsterImage(id, uploadKey \| null)` |
-| Access | `regenerateDockUrl`, `regenerateOverlayUrl` |
+| Ruleset | `updateRules(patch)`, `updateBaseStats(patch)`, `updateLevelGrowth(patch)`, `resetRules`, `resetBaseStats`, `resetLevelGrowth`, `replaceRuleset(ruleset)` (JSON import), `resetRuleset` (whole ruleset back to default), `exportRuleset` (returns the ruleset JSON) |
+| Monsters | `createMonster(template)`, `updateMonster(id, patch)`, `deleteMonster(id)`, `uploadMonsterImage(id, file)` (PNG, GIF or WebP, ≤ 2 MB), `removeMonsterImage(id)` |
+| Access | `regenerateDockUrl`, `regenerateOverlayUrl`, `disconnectChatBans` |
 
 - Every ruleset change is validated (§4.1). Invalid changes are rejected with the list of errors.
-- Image upload is a separate HTTP upload (PNG, GIF or WebP, ≤ 2 MB) that returns an upload key, which `setMonsterImage` then uses.
-- `exportRuleset` is a read, not a command.
+- `uploadMonsterImage` is sent to the command API as a multipart request; every other command is JSON.
 
 ### 5.3 Control dock
 
 A web page added as an OBS custom browser dock. Tabs:
 
-- **Live**: adventure state, current monster (HP, next-attack countdown, fighting/paused), party list (HP, status, class) with per-player command buttons, and buttons for every game command.
+- **Live**: adventure state, current monster (HP, next-attack countdown, fighting/waiting, held), party list (HP, status, class) with per-player command buttons, and buttons for every game command.
 - **Monsters**: form editor for monster templates and images. New channels start with the default ruleset's 3 starter monsters (no images).
-- **Rules**: form editor for `rules`, `baseStats` and `levelGrowth`, with "reset to default".
+- **Rules**: form editors for `rules`, `baseStats` and `levelGrowth`, each with its own reset (`resetRules`, `resetBaseStats`, `resetLevelGrowth`).
 - **Ruleset JSON**: view, edit, import and export the whole ruleset, including classes and items.
-- **Setup**: overlay URL, dock URL (with regenerate), and a link to install the extension.
+- **Setup**: overlay URL and dock URL (each with regenerate), chat-ban connection (connect/disconnect), and a link to install the extension.
 
 ## 6. Data
 
 ### 6.1 Persistent tables (Postgres)
 
-- **channels**: Twitch broadcaster ID, display name, ruleset (JSON), dock token hash, overlay token hash, streamer's Twitch refresh token (encrypted, for chat bans), created/updated times.
+- **channels**: Twitch broadcaster ID, display name, ruleset (JSON), dock token and overlay token (each stored encrypted, plus a hash for lookup), streamer's Twitch refresh token for chat bans (encrypted; present only while chat bans are connected), created/updated times.
 - **players**: channel ID, Twitch user ID, display name, level, XP, gold, current HP, equipped weapon ID, equipped armor ID, knockout-until time, banned flag, removed-by-streamer-until-resting flag. Unique on (channel, Twitch user).
 - **inventory**: player ID, item ID, quantity.
 - **room_snapshots**: channel ID, serialized live state (JSON), saved time, engine state version.
@@ -306,12 +315,12 @@ A web page added as an OBS custom browser dock. Tabs:
 
 **Player rows are the source of truth for player progress.** Every change to any field in `players` or `inventory` (XP, gold, level, HP, gear, inventory, knockout-until, flags) is written in the same Room input that caused it, before events are broadcast. This includes streamer commands such as `giveGold` and `healParty`.
 
-**The room snapshot holds only live, non-progress state**: adventure and encounter state, party membership and join times, monster HP and next attack time, cooldowns, drowsy and guard effects, and who has acted this encounter. It is written:
+**The room snapshot holds only live, non-progress state**: adventure and encounter state, held flag, party membership and join times, monster HP and next attack time, cooldowns, drowsy and guard effects, and who has acted this encounter. It is written:
 
-- immediately after adventure start/end, encounter start/end, join/leave, and any streamer command;
+- immediately after adventure start/end, encounter start/end, join/leave, any streamer command, and a member's first action in an encounter (so the record of who has acted is never lost);
 - otherwise at most every 10 s while something changed.
 
-**Restart**: on load, the Room reads its snapshot and the player rows. Timestamps are absolute, so effects, knockouts and cooldowns that expired during the downtime are treated as expired. If the encounter is fighting, the monster's next attack is scheduled a full interval from the moment of load. Up to ~10 s of snapshot-only state (monster HP, cooldowns, drowsy/guard) can be lost; player progress is never lost.
+**Restart**: on load, the Room reads its snapshot and the player rows. Timestamps are absolute, so effects, knockouts and cooldowns that expired during the downtime are treated as expired. If the encounter is fighting and the monster isn't held, its next attack is scheduled a full interval from the moment of load. Up to ~10 s of snapshot-only state (monster HP, cooldowns, drowsy/guard) can be lost; player progress and who has acted are never lost.
 
 ## 7. Real-time updates
 
@@ -325,7 +334,7 @@ A web page added as an OBS custom browser dock. Tabs:
 
 - Twitch limits: 5 KB per message; about 1 message per second per channel.
 - The server sends a compact snapshot to the channel's broadcast topic at most once per second, only when state changed.
-- Contents: adventure/encounter state (incl. fighting/paused), monster (ID, HP, max HP, next attack time, last strike time), party entries as `[playerKey, classId, hpPercent, statusFlags]`, and a `rosterVersion` number.
+- Contents: adventure/encounter state (incl. fighting/waiting and held), monster (ID, HP, max HP, next attack time, last strike time), party entries as `[playerKey, classId, hpPercent, statusFlags]`, and a `rosterVersion` number.
 - Names and gear are not in the snapshot. When `rosterVersion` changes, the extension fetches the roster (player keys → names, classes, levels) over HTTP.
 - **Trimming**: if a snapshot would exceed 5 KB (only possible with a very large `partyCap`), it lists only the first party members by join order plus a `partyTotal` count. The snapshot is used only for showing the party and monster; no viewer relies on it for their own state (§7.3).
 
@@ -343,9 +352,10 @@ Viewers who aren't in the party don't poll. Cooldown countdowns are computed in 
 ## 8. Auth and identity
 
 - **Viewers**: the extension sends Twitch's extension JWT with each request. The server verifies it with the extension secret and reads `channel_id` and `user_id`. Joining requires `user_id` (identity shared). Viewers who haven't shared identity, and logged-out viewers, can watch but can't join.
-- **Streamer sign-up**: a web page with Twitch login (OAuth), requesting the `moderator:manage:banned_users` scope for chat bans. Signing in creates the channel and shows the dock and overlay URLs. Admin commands can be sent from this page (logged-in session) or the dock.
+- **Streamer sign-up**: a web page with Twitch login (OAuth, no extra scopes). Signing in creates the channel; this page and the dock's Setup tab show the dock and overlay URLs at any time. Admin commands can be sent from this page (logged-in session) or the dock.
+- **Chat bans** are opt-in: the first time the streamer connects them (Setup tab), a second Twitch login asks for the `moderator:manage:banned_users` scope and the refresh token is stored. `disconnectChatBans` deletes the stored token.
 - **Dock URL** carries the dock token: can send every game and admin command. **Overlay URL** carries the overlay token: read-only.
-- Tokens are random 32-byte values; only hashes are stored. Regenerating a URL invalidates the old one.
+- Tokens are random 32-byte values, stored encrypted (so URLs can be shown again) with a hash used for lookup. Regenerating a URL invalidates the old one.
 - If a viewer opens the extension on a channel that hasn't signed up, it shows "This streamer hasn't set up the game yet."
 - Display names come from Twitch's Get Users API (app access token) and are refreshed on join.
 
@@ -353,7 +363,7 @@ Viewers who aren't in the party don't poll. Cooldown countdowns are computed in 
 
 - Type: video overlay, with a collapsible side panel. On mobile, the same panel fills the chat-area view.
 - **Not joined**: "Join the party" → identity share (first time) → weapon pick (from the player's weapons; class names and icons come from the ruleset).
-- **In party, during combat**: own HP bar, status icons, level, gold; action buttons for the current class with countdowns (greyed out on cooldown or while knocked out); party list (tap a member to target ally actions); monster name, HP, next-attack countdown, and a "paused" state.
+- **In party, during combat**: own HP bar, status icons, level, gold; action buttons for the current class with countdowns (greyed out on cooldown or while knocked out); party list (tap a member to target ally actions); monster name, HP, next-attack countdown, and "waiting" / "held" states.
 - **In party, resting**: gear and inventory; change weapon (class) or armor.
 - **Removed, banned, or no adventure**: a short message, and a Rejoin button when §4.3 allows it.
 - Failed actions show a short message: "On cooldown (4s)", "You're knocked out", "Not in the party".
@@ -381,8 +391,8 @@ Viewers who aren't in the party don't poll. Cooldown countdowns are computed in 
 
 ## 13. Testing
 
-- **Engine** (test-first, seeded RNG): every effect type; damage and crits; cooldowns and drowsy; targeting with and without guard; knockout from HP and from chance; knockout expiry and revive; fighting/paused transitions (wipe, empty party, join during pause); eligibility and idle removal (incl. the knocked-out exemption and mid-fight joins); the join table in §4.3; rewards and drops; levels; every game command; ruleset validation; ruleset changes (allowed timing, missing equipped items, hidden inventory); a custom ruleset with non-default classes.
+- **Engine** (test-first, seeded RNG): every effect type; damage and crits; cooldowns and drowsy; targeting with and without guard; knockout from HP and from chance; knockout expiry and revive; fighting/waiting transitions (wipe, empty party, join while waiting); hold and release in both sub-states; every on/off rule in both positions; weapon on joining; eligibility and idle removal (incl. the knocked-out exemption and mid-fight joins); the join table in §4.3; rewards and drops; levels; every game command; ruleset validation; ruleset changes (allowed timing, missing equipped items, hidden inventory); a custom ruleset with non-default classes.
 - **Room** (fake clock): timer scheduling, full fight start to finish, input ordering, player-row writes on every progress change, snapshot save triggers, restart and resume.
-- **Server**: JWT verification, dock/overlay token checks, every admin command, action endpoints, chat-ban call, PubSub snapshot size and trimming, own-state endpoint.
+- **Server**: JWT verification, dock/overlay token checks and encrypted storage, every admin command, chat-ban connect/disconnect, action endpoints, chat-ban call, PubSub snapshot size and trimming, own-state endpoint.
 - **Simulator** (dev only, in `apps/web`): spawns fake viewers who join and act at random, to test large parties locally.
 - **Manual**: Twitch local test mode for the real extension on desktop and mobile.
