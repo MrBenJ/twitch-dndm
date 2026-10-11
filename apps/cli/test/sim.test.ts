@@ -46,6 +46,12 @@ describe('dndm sim', () => {
     expect(r).toMatchObject({ runs: 1, wins: 0, timeouts: 1 });
   });
 
+  it.each(['Infinity', '0', '-2', '1.5', 'abc', '100001'])('rejects --runs %s', async (runs) => {
+    const lines: string[] = [];
+    expect(await simCommand({ party: 'fighter', vs: 'slime', runs, seed: 1, write: (l) => lines.push(l) })).toBe(2);
+    expect(lines[0]).toBe('error: --runs must be a whole number from 1 to 100000');
+  });
+
   it('the command prints a report and rejects bad input', async () => {
     const lines: string[] = [];
     expect(await simCommand({ party: 'fighter,tank', vs: 'slime', runs: '3', seed: 1, write: (l) => lines.push(l) })).toBe(0);

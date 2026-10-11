@@ -141,6 +141,8 @@ export function simulate(o: SimOptions): SimReport {
   };
 }
 
+const MAX_RUNS = 100_000;
+
 function parseReaction(text: string | undefined): [number, number] {
   if (!text) return [0, 0];
   const [lo, hi] = text.split('-');
@@ -152,9 +154,11 @@ export async function simCommand(opts: SetupOpts & {
 }): Promise<number> {
   try {
     if (!opts.party || !opts.vs) throw new CliError('Usage: dndm sim --party <classes> --vs <monster>');
+    const runs = opts.runs === undefined ? 100 : Number(opts.runs);
+    if (!Number.isSafeInteger(runs) || runs < 1 || runs > MAX_RUNS) throw new CliError(`--runs must be a whole number from 1 to ${MAX_RUNS}`);
     const engine = await setup(opts);
     const report = simulate({
-      engine, party: opts.party.split(','), vs: opts.vs, runs: opts.runs ? Number(opts.runs) : 100, seed: opts.seed,
+      engine, party: opts.party.split(','), vs: opts.vs, runs, seed: opts.seed,
       reaction: parseReaction(opts.reaction), maxTime: parseDuration(opts.maxTime ?? '30m'),
     });
     if (opts.json) {
