@@ -28,6 +28,22 @@ describe('Driver', () => {
     expect(JSON.parse(formatOutput(ev!, true))).toEqual({ kind: 'event', type: 'core:session-opened', at: 0, text: 'A new session begins', data: {} });
   });
 
+  it('a viewer can only send viewer commands; streamer commands are refused', () => {
+    const d = new Driver(engine, 1);
+    d.exec({ as: 'streamer', command: { type: 'openSession' } });
+    d.exec({ as: 'al', command: { type: 'join', name: 'Al', pick: 'starter:sword' } });
+    const out = d.exec({ as: 'al', command: { type: 'giveGold', target: 'al', amount: 10 } });
+    expect(out.map((o) => formatOutput(o, false))).toEqual(["[    0.0s] ✗ al: Only the streamer can do that (streamer-only)"]);
+    expect(d.game.characters.al!.gold).toBe(0);
+  });
+
+  it('a viewer line always acts as that viewer, whatever character it names', () => {
+    const d = new Driver(engine, 1);
+    d.exec({ as: 'streamer', command: { type: 'openSession' } });
+    d.exec({ as: 'al', command: { type: 'join', name: 'Al', pick: 'starter:sword', character: 'bo' } });
+    expect(d.game.session!.party).toEqual(['al']);
+  });
+
   it('wait and next move time; next with nothing scheduled says so', () => {
     const d = new Driver(engine, 1);
     expect(d.exec({ next: true }).map((o) => formatOutput(o, false))).toEqual(['[    0.0s] · Nothing is scheduled']);

@@ -38,9 +38,12 @@ export class Driver {
       this.now = Math.max(this.now, t);
       return this.advance();
     }
-    const command = (line.as !== 'streamer' && VIEWER.has(String(line.command.type))
-      ? { ...line.command, character: line.as }
-      : line.command) as unknown as Command;
+    // Who sent it decides what it may do (spec §11.2): viewers send viewer commands, as themselves.
+    const isViewerCommand = VIEWER.has(String(line.command.type));
+    if (line.as !== 'streamer' && !isViewerCommand) {
+      return [{ kind: 'rejected', at: this.now, as: line.as, code: 'streamer-only', text: 'Only the streamer can do that' }];
+    }
+    const command = (line.as !== 'streamer' ? { ...line.command, character: line.as } : line.command) as unknown as Command;
     const r = this.engine.apply(this.game, command, this.now);
     if (!r.ok) return [{ kind: 'rejected', at: this.now, as: line.as, code: r.error.code, text: r.error.message }];
     this.game = r.game;

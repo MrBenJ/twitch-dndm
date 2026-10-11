@@ -58,6 +58,7 @@ describe('dndm sim', () => {
     [{ reaction: 'nope' }, "error: --reaction: Invalid duration 'nope' (use 500ms, 8s, 2m or 1h)"],
     [{ reaction: '1s-soon' }, "error: --reaction: Invalid duration 'soon' (use 500ms, 8s, 2m or 1h)"],
     [{ reaction: '3s-1s' }, 'error: --reaction must be low-high with low ≤ high, like 1s-3s'],
+    [{ reaction: '1s-2s-999h' }, 'error: --reaction must be one duration or low-high, like 1s-3s'],
   ])('rejects bad durations %j', async (bad, message) => {
     const lines: string[] = [];
     expect(await simCommand({ party: 'fighter', vs: 'slime', runs: '1', seed: 1, ...bad, write: (l) => lines.push(l) })).toBe(2);

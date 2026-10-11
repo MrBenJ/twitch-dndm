@@ -164,7 +164,9 @@ function flagDuration(flag: string, text: string): number {
 
 function parseReaction(text: string | undefined): [number, number] {
   if (!text) return [0, 0];
-  const [lo, hi] = text.split('-');
+  const parts = text.split('-');
+  if (parts.length > 2) throw new CliError('--reaction must be one duration or low-high, like 1s-3s');
+  const [lo, hi] = parts;
   const range: [number, number] = [flagDuration('--reaction', lo!), flagDuration('--reaction', hi ?? lo!)];
   if (range[0] > range[1]) throw new CliError('--reaction must be low-high with low ≤ high, like 1s-3s');
   return range;
