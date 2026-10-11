@@ -27,11 +27,12 @@ Ground rules:
 - The starter pack gets no special treatment. It uses the same API as any
   other pack. If it needs an engine special case, fix the API.
 - Only HP is a core stat. Packs register every other stat.
-- Only official packs contain code. Streamer content is data only.
-  Third-party code waits for a sandbox.
+- Only official packs (shipped in `packs/`) contain code. Streamer content
+  is data only. Third-party code waits for a sandbox.
 - Pack code runs only on the server. The extension and overlay render data.
 - Plugins use the engine's RNG and clock. Never `Math.random` or `Date.now`.
-- IDs are namespaced (`starter:sword`). Every reference is checked at load.
+- IDs are namespaced (`starter:sword`). Every reference is checked at load;
+  references to a pack that's off go dormant instead of failing.
 - When a pack is turned off, its items go dormant: kept, greyed out, and back
   when it is turned on again.
 - Adventures line up the next encounter. The streamer always presses go.
@@ -63,7 +64,7 @@ Plugin slots (registries)
 Content types (data, schema-checked)
 - [ ] Classes (self-contained bundle)
 - [ ] Abilities (cooldown + targeting + effect steps)
-- [ ] Items: gear (slot, stats, passives, grants class) and consumables (use ability, uses)
+- [ ] Items: gear (slot, stats, passives, grants class) and consumables (use ability, optional uses)
 - [ ] Monsters (stats, abilities, passives, behavior)
 - [ ] Shops (stock, prices, timer, secret)
 - [ ] Events: story beat, vote / decision, treasure / rest, trap / hazard
@@ -71,14 +72,15 @@ Content types (data, schema-checked)
 
 Packs and channels
 - [ ] Pack format: manifest, code, content, art
-- [ ] Pack loader with dependency, version and reference checks (fail loudly)
+- [ ] Pack loader with dependency, version and reference checks (fail loudly;
+      references to disabled packs go dormant)
 - [ ] Channel layering: enabled packs → channel pack → overrides → settings
 - [ ] Dormant content when a pack is off or content is deleted
 - [ ] Channel settings (rev 7 rules + starting items)
 
 Starter pack (free, open source)
 - [ ] Stats: attack, defense, healing power
-- [ ] Effects, statuses (drowsy, knocked out, guarding), targeting, passives
+- [ ] Effects, statuses (drowsy, guarding), targeting (knocked out is core)
 - [ ] Classes: Fighter, Tank, Healer, with their weapons and abilities
 - [ ] Starter monsters and default monster behavior
 - [ ] Starter shop and consumables
@@ -109,7 +111,7 @@ Carries over most of spec rev 7 (`docs/superpowers/specs/2026-10-08-core-game-de
       adventure "next up" and go
 - [ ] Overlay (OBS browser source): fights, story beats with video/images/text
 - [ ] Twitch extension viewer panel (mobile first), fixed widget set:
-      choices, vote, shop list, tap button, story card
+      choices (also used for votes), shop list, tap button, story card
 - [ ] Simple forms to build monsters, abilities, classes and items (channel pack)
 
 ## Project 4: Adventure editor
