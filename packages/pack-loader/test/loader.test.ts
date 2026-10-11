@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -57,7 +57,8 @@ describe('loadPack', () => {
 
 describe('repo helpers', () => {
   it('finds the repo and its packs', () => {
-    expect(repoRoot()).toMatch(/twitch-dndm$/);
+    // Any checkout folder name works; the root is wherever the workspace file lives.
+    expect(existsSync(join(repoRoot(), 'pnpm-workspace.yaml'))).toBe(true);
     expect(listPackDirs()).toEqual([join(repoRoot(), 'packs', 'starter')]);
   });
 
