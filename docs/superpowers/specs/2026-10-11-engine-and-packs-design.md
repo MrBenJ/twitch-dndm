@@ -1,7 +1,7 @@
 # twitch-dndm — Project 1: Engine and Packs
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 3)
+**Status:** Draft for owner review (revision 4)
 **Roadmap:** `docs/roadmap.md`, Project 1
 **Replaces:** the game rules in `2026-10-08-core-game-design.md` (rev 7) §4 and §5.1. The rest of rev 7 is the starting point for Project 2 (server and live play).
 
@@ -21,9 +21,9 @@ The original hand-coded game (`../twitch-emitter`) is a reference for game feel 
 1. **The starter pack gets no special treatment.** The engine source never names a starter-pack ID. This is enforced by a test (§14).
 2. **The loop is fixed.** Packs add things that happen inside the loop. They can't change what a session, encounter, fight or knockout is.
 3. **HP is the only core stat.** Packs register every other stat.
-4. **Plugins never edit game state directly.** They call engine operations (§5.2), so every change passes through modifiers and produces an event. One stated exception: an encounter kind's own state (vote tallies, claims, §6.7), which only that kind reads and writes.
+4. **Plugins never edit game state directly.** They call engine operations (§5.2), so every change produces an event and passes through its modifier point if it has one (§5.4). One stated exception: an encounter kind's own state (vote tallies, claims, §6.7), which only that kind reads and writes.
 5. **Determinism.** The engine and all pack code use only the engine's seeded RNG and the `now` passed in. The same packs, channel config, seed and command list always produce the same events.
-6. **Only official packs contain code**, because there is no sandbox for other people's code yet. Official packs are defined in §5.1. Content made by a streamer (the channel pack, §7.2) is data only.
+6. **Only official packs contain code**, because there is no sandbox for other people's code yet. Official packs are defined in §5.1: the pack loader accepts code only from this repository's `packs/`; callers of the engine (tests, and later the server) are trusted. Content made by a streamer (the channel pack, §7.2) is data only.
 
 ### 1.2 Success criteria
 
@@ -86,8 +86,8 @@ Everything the fixed loop needs, and nothing else:
 
 - Every pack has an ID (`starter`). Every item of content or plugin has an ID that is unique **within its type** in its pack. (`starter` may have both a stat `attack` and an ability `attack`; fields always say which type they refer to.)
 - A full ID is `pack:id`, e.g. `starter:sword`. Core IDs use the pack ID `core`.
-- Inside a pack's own files, an unprefixed ID means that pack's own item of that type; if the pack has none, it means the core's (`fight` → `core:fight`). Anything from another pack must be prefixed. An unresolved reference is a validation error.
-- In the channel pack (§7.2), unprefixed IDs mean the channel's own content; everything else is prefixed.
+- Inside a pack's own files, an unprefixed ID means that pack's own item of that type; if the pack has none, it means the core's (`fight` → `core:fight`). Anything from another pack must be prefixed, and a pack may only refer to packs it lists in `depends`. An unresolved reference is a validation error, except the dormant cases in §7.4.
+- The channel pack (§7.2) follows the same rule: an unprefixed ID means the channel's own content, then the core's; anything from another pack is prefixed.
 - Data keys are kebab-case everywhere: YAML, JSON, saved state (`grants-class`, `show-for`). This spec writes setting names in camelCase (`partyCap`); in files they are kebab-case (`party-cap`).
 - Durations are written as `500ms`, `8s`, `2m` or `1h`. Inside the engine all times are integer milliseconds.
 
@@ -113,7 +113,8 @@ packs/starter/
 - `depends` maps pack IDs to semver ranges, e.g. `{ "starter": "^1.0.0" }`.
 - The pack loader reads the folder and hands the engine a **pack bundle**: manifest, `register` function and parsed content documents. The engine never touches the disk.
 - A data-only pack has no `src/`.
-- **Official packs** are the folders in this repository's `packs/`, and nothing else. Anyone writing a pack with code puts it there. The loader marks each bundle `official` or not, and `createEngine` refuses a non-official bundle that has a `register` function. Non-official packs may be data-only. Signed paid packs come later.
+- **Official packs:** the pack loader is the only way packs come in from outside the code base, and it treats only the folders in this repository's `packs/` as official. Anyone writing a pack with code puts it there. The loader marks each bundle `official` or not, and `createEngine` refuses a non-official bundle that has a `register` function. Non-official packs may be data-only.
+- `createEngine` trusts its caller. Code that calls it directly (the engine's own tests, and later the Project 2 server, which loads packs through the loader) may build official bundles in code; this is how test packs (§14) are made. Signed paid packs come later.
 
 ### 5.2 Registering plugins
 
@@ -121,8 +122,6 @@ packs/starter/
 
 | Call | Registers |
 |---|---|
-| `api.stat(id, def)` | A stat: `name`, `icon`, `default`, `per-level` |
-| `api.slot(id, def)` | An equipment slot: `name` |
 | `api.effect(id, def)` | An effect: `params` schema, `apply(ctx, { source, target, params })`. `source` is null when there is none (trap penalties, §9.6) |
 | `api.status(id, def)` | A status: `name`, `icon`, `params`, `stacking`, `modify`, `react`, optional `tick` |
 | `api.passive(id, def)` | A passive: `name`, `params`, `modify`, `react` |
@@ -130,7 +129,7 @@ packs/starter/
 | `api.behavior(id, def)` | A monster behavior: `params`, `act(ctx, { monster, params })` |
 | `api.encounterKind(id, def)` | An encounter kind (§6.7) |
 
-Content documents in `content/` are registered automatically by the loader.
+Content documents in `content/` (§8), including stats and slots, are registered automatically by the loader. Plugin params may have defaults in code, but every number the starter pack uses is written in its content, so overrides (§7.3) reach all of them.
 
 **Operations on `ctx`** (the only way a plugin changes the game):
 
@@ -175,6 +174,7 @@ Content documents in `content/` are registered automatically by the loader.
 | `targetPriority` | candidate | priority number |
 | `stat` | entity | a stat's value. Inside this modifier, `ctx.stat` returns unmodified values |
 | `canUse` | user | `true`, or a short reason string that rejects an ability use |
+| `rewardsReceived` | character | `{ xp, gold }` paid by `giveRewards`, after the channel multipliers |
 
 Damage and healing amounts are rounded to the nearest whole number after all modifiers, minimum 0.
 
@@ -198,6 +198,7 @@ When an operation has no source, source-side modifiers (`damageDealt`, `healingG
 Numbers in content can be formulas, written as text: `power: 1.5 * attack + 2`.
 
 - Numbers, `+ - * /`, parentheses.
+- Stat names may contain hyphens (`crit-chance`). Subtraction needs a space on both sides (`attack - 2`); a hyphen without spaces is part of a name, so `attack-2` is an unknown stat (a validation error).
 - Stat names: a bare name is the source's stat; `target.<stat>` is the target's. Stats from other packs are prefixed (`mage:mana`, `target.mage:mana`).
 - `hp`, `hp.max`, `level`, and the same with `target.`.
 - Functions: `min`, `max`, `floor`, `ceil`, `round`, `random(a, b)` (a decimal between a and b, from the engine RNG).
@@ -222,7 +223,7 @@ A character is per (channel, viewer) and keeps: name, level, XP, gold, current H
 - **Class:** a character's class is the class granted by their effective item in the **class slot** (`settings.classSlot`): the equipped item, or the fallback in §7.4 if it's dormant. A character with no effective item there has no class: they keep any abilities from gear and consumables. The engine works with zero classes defined.
 - **Abilities available** to a character: their class's abilities, then abilities on equipped items, then the use ability of each consumable they own.
 - **Stats:** a stat's value is its `default + per-level × (level − 1)`, plus class and equipped-gear bonuses, then the `stat` modifier.
-- **HP and max HP:** the HP the game uses is the lower of the saved current HP and max HP. When the character changes gear or levels and max HP drops below their current HP, the saved current HP is lowered to the new max. A rise in max HP doesn't raise current HP. Dormancy never writes HP (§7.4).
+- **HP and max HP:** the HP the game uses is the lower of the saved current HP and max HP. When the character changes their own gear and max HP drops below their current HP, the saved current HP is lowered to the new max (as it is with any dormancy in effect at that moment). A rise in max HP doesn't raise current HP. Dormancy by itself never writes HP (§7.4).
 
 ### 6.3 Joining and leaving
 
@@ -300,7 +301,7 @@ api.encounterKind('vote', {
 
 - Viewers send `respond(input)`. Only party members can respond.
 - **`ended`** is a core outcome every encounter has, in addition to its kind's outcomes. It's used by `closeSession` and by `endEncounter(ended)`.
-- The streamer can end any encounter with `endEncounter(outcome?)`. The outcome must be `ended` or one of the kind's outcomes; if none is given, `endEarly` decides.
+- The streamer can end any encounter with `endEncounter(outcome?)`. The outcome must be `ended` or one of the kind's outcomes; if none is given, `endEarly` decides (for a fight, `ended`).
 - Non-fight encounters never remove anyone for being idle and never pay fight rewards. Kinds pay their own rewards through `ctx.giveRewards`.
 - Joining during a non-fight encounter follows §6.3.
 
@@ -336,7 +337,11 @@ The CLI renders both as text. Adding a widget is an engine change plus a screen 
 
 - `engine.advance(game, now)` processes everything due up to `now` in time order: status expiry and ticks, knockout ends, monster turns, encounter-kind wakes.
 - `engine.nextWakeTime(game)` returns the earliest due time, or null.
-- `engine.resume(game, now)` is called after loading a saved game. Expired timers are processed first (knockouts before anything else, which may turn waiting into fighting). Then, for a fight that's fighting and not held, `fullIntervalAfterRestart` alone decides the next monster turn: on, a full interval from now; off, the saved time (a turn due during the downtime happens now).
+- `engine.resume(game, now)` is called after loading a saved game. Time is frozen while the game isn't running: nothing acts during the downtime.
+  - Things that end, end: expired knockouts first (which may turn waiting into fighting), then expired statuses and cooldowns.
+  - Encounter-kind wakes that fell due run once (a vote whose time ran out closes now).
+  - Monster turns and status ticks that fell due are not replayed.
+  - Then, for a fight that's fighting and not held, `fullIntervalAfterRestart` alone decides the next monster turn: on, a full interval from now; off, the saved time (a turn due during the downtime happens now).
 
 ## 7. Channels
 
@@ -366,23 +371,24 @@ overrides:
 ```
 
 - The merged content is validated like any other.
-- An override for content that doesn't resolve (its pack is off) is kept and ignored.
+- An override for dormant content (§7.4) is kept and ignored.
 
 ### 7.4 Dormant content
 
-Content is **dormant** when it can't be resolved: its pack is off, or it was deleted from the channel pack.
+Content is **dormant** when its pack is off, or when it was deleted from the channel pack. The channel pack keeps a list of the IDs deleted from it, so a deletion can be told apart from a typo.
 
 - **Dormant references are warnings, not errors.** These go dormant instead of failing validation:
-  - channel-pack content that refers to a pack that isn't enabled, or to channel content that is dormant or deleted (the referring content becomes dormant too);
+  - channel-pack content that refers to a pack that isn't enabled, or to channel content that is dormant or on the deleted list (the referring content becomes dormant too);
   - settings that refer to them: a dormant `classSlot` counts as unset, and dormant `startingItems` entries are skipped;
   - overrides for them (§7.3).
-- References inside an enabled official pack (to itself, the core, or a pack it depends on) must resolve; those are errors (§10).
+- An override for content that doesn't resolve is kept and ignored only in these dormant cases; otherwise it's an error.
+- Every other unresolved reference is an error (§10), in any pack, the channel pack, settings or overrides. A typo such as `starter:swrod` while `starter` is enabled fails loudly.
 
 - Saved state is never rewritten because of dormancy. Characters keep dormant items in their inventory and in their equipped slots. A character's own action can still change a slot: equipping, or picking on join (§6.3), replaces the dormant item in that slot, and the dormant item stays in the inventory.
 - Dormant inventory items are shown as unavailable and can't be used, equipped or given.
 - A dormant equipped item counts as empty. If it was in the class slot, the character's effective class item is the first resolvable starting item for that slot, if any.
 - Statuses and cooldowns that refer to dormant content are ignored while dormant.
-- When the content resolves again, everything returns as it was, apart from slots the character changed. While max HP is lower because of dormancy, the HP used is capped (§6.2); saved HP changes only through real HP changes (damage, healing), which save the new value.
+- When the content resolves again, everything returns as it was, apart from slots the character changed. While max HP is lower because of dormancy, the HP used is capped (§6.2). Saved HP changes only through damage, healing, and the character's own gear changes (§6.2), each of which saves the capped value.
 - **Changing a running game:** `engine.adopt(game)` re-checks a saved game against the engine's current channel config. It's rejected with `content-in-use` if the running encounter or a lined-up adventure uses content that no longer resolves. When a streamer may change packs or content mid-session is decided in Project 2.
 
 ### 7.5 Settings
@@ -406,16 +412,31 @@ Content is **dormant** when it can't be resolved: its pack is off, or it was del
 | `xpCurve` | level 2 at 80 XP, each later step 50 more (80, 130, 180, …) |
 | `xpMultiplier` / `goldMultiplier` | 1.0 / 1.0 |
 | `monsterInterval` | 20s |
-| `classSlot` | none (the starter channel default sets `starter:weapon`) |
-| `startingItems` | none (the starter channel default sets sword, shield, staff) |
+| `classSlot` | none (`channels/default.yaml` sets `starter:weapon`) |
+| `startingItems` | none (`channels/default.yaml` sets sword, shield, staff) |
 
 (Written in kebab-case in files: `party-cap`, `allow-join-mid-fight`, and so on.)
 
-The CLI's default channel config enables `starter` and sets `classSlot: starter:weapon` and `startingItems: [starter:sword, starter:shield, starter:staff]`. These values live in the starter pack's `default-channel.yaml`, not in the engine.
+The CLI's default channel config is the file `channels/default.yaml` in this repository. It enables `starter` and sets `classSlot: starter:weapon` and `startingItems: [starter:sword, starter:shield, starter:staff]`. The CLI refers to that file path, never to a pack ID.
 
 ## 8. Content types
 
 Every content document starts with its type key and ID. The examples use the starter pack.
+
+### 8.0 Stat and slot
+
+```yaml
+stat: attack
+name: Attack
+icon: null
+default: 5
+per-level: 1
+---
+slot: weapon
+name: Weapon
+```
+
+`hp` is the core's stat and can't be defined by a pack.
 
 ### 8.1 Class
 
@@ -534,7 +555,7 @@ All numbers below are the starter pack's content, so a streamer can override any
 | `crit-chance` | 5 | 0 | % chance the `damage` effect crits |
 | `crit-multiplier` | 2 | 0 | Damage multiplier on a crit |
 
-Slots: `weapon` (the default class slot) and `armor`.
+Slots: `weapon` (the class slot in `channels/default.yaml`) and `armor`. Stats and slots are content documents (§8.0).
 
 ### 9.2 Plugins
 
@@ -546,8 +567,8 @@ Slots: `weapon` (the default class slot) and `armor`.
 | Effect | `apply-status` | `status`, `duration`, status params |
 | Effect | `remove-status` | `status` |
 | Effect | `knock-out` | `chance`; knocks out on a successful roll |
-| Status | `drowsy` | `cooldown` modifier: × `multiplier` (1.5). Stacking: refresh |
-| Status | `guarding` | `damageTaken` × (1 − `reduction`%); `targetPriority` + `priority` (default 1; 0 turns guard-first targeting off). Stacking: refresh |
+| Status | `drowsy` | `cooldown` modifier: × `multiplier` (Yawn passes 1.5). Stacking: refresh |
+| Status | `guarding` | `damageTaken` × (1 − `reduction`%); `targetPriority` + `priority` (Guard passes 1; 0 turns guard-first targeting off). Stacking: refresh |
 | Targeting | `self`, `enemy`, `ally`, `knocked-out-ally` | `enemy` picks the chosen enemy, or a random one; `ally` includes self |
 | Targeting | `random-enemies` | `count` (or `hints.count`) enemies via `ctx.byPriority` |
 | Behavior | `weighted` | Picks an ability by weight. Targets per turn = `ceil(active members / targets-per)`, minimum 1, passed as `hints.count` |
@@ -580,7 +601,7 @@ Weapons give no stat bonuses. Icons: simple vector sword, shield and staff (§12
 
 **Items:** Sword, Shield, Staff (weapons, starting items); Leather Armor (armor, defense +5, 40 gold); Health Potion (Drink Potion, 15 gold); Smelling Salts (10 gold).
 
-**Monster abilities:** Club Swing (`random-enemies`, damage `attack`), Yawn (`random-enemies`, apply `drowsy` 30s), Crushing Blow (`random-enemies`, damage `1.5 * attack`, then `knock-out` chance 0.1).
+**Monster abilities:** Club Swing (`random-enemies`, damage `attack`), Yawn (`random-enemies`, apply `drowsy` 30s, multiplier 1.5), Crushing Blow (`random-enemies`, damage `1.5 * attack`, then `knock-out` chance 0.1).
 
 | Monster | HP | Attack | Defense | Interval | Abilities (weight) | XP / gold | Drops |
 |---|---|---|---|---|---|---|---|
@@ -606,7 +627,7 @@ All three use `targets-per: 5` and set `crit-chance: 0` (monster hits don't crit
 
 ### 9.7 Sample adventure
 
-`the-cave` (§8.6) is the adventure in success criterion 1. Its main path is story → vote → (fight or shop) → trap → treasure; losing or leaving the fight goes to `rest`. Between its two vote branches it uses every starter kind.
+`the-cave` (§8.6) is the adventure in success criterion 1. Its main path is story → vote → (fight or shop) → trap → treasure; fleeing or ending the fight goes to `rest`. Between its two vote branches it uses every starter kind.
 
 ## 10. Validation
 
@@ -615,7 +636,8 @@ Run by `createEngine` and `dndm validate`. Each error names the pack, file, docu
 - Every pack's manifest is valid, its ID is unique, and its dependencies are present in matching versions with no cycles.
 - No two items of the same type share an ID within a pack.
 - Every content document matches its type's schema, and every plugin's params match the plugin's `params` schema.
-- Every reference inside an enabled official pack resolves: stats, slots, classes, abilities, items, monsters, effects, statuses, passives, targeting rules, behaviors, encounter kinds, encounters, adventure nodes. Unresolved references from the channel pack, settings and overrides are dormant warnings (§7.4).
+- Every reference resolves (stats, slots, classes, abilities, items, monsters, effects, statuses, passives, targeting rules, behaviors, encounter kinds, encounters, adventure nodes), in every pack, the channel pack, settings and overrides. The only exceptions are the dormant cases in §7.4, which are warnings.
+- A pack refers only to itself, the core, and packs in its `depends`.
 - Every formula parses and names only known stats (and follows the no-source rule where it applies).
 - Every adventure node is reachable from `start`, and every `next` map key other than `default` is `ended` or an outcome of that node's kind.
 - Non-official packs have no code (§5.1).
@@ -682,7 +704,7 @@ Time in the CLI is **stepped**: it moves only on `wait <duration>` or `next` (ju
 | `dndm run <script.jsonl> [--packs dirs] [--channel file] [--seed n]` | Runs a script and prints every event |
 | `dndm sim --party <classes> --vs <monster> [--packs dirs] [--channel file] [--runs n] [--seed n]` | Runs many fights with bot players; reports win rate, fight length, knockouts and damage and healing by ability |
 
-- `--packs` takes folders; a folder outside this repository's `packs/` is loaded as non-official (data only). Without `--packs`, every folder in `packs/` is loaded.
+- `--packs` takes folders; a folder outside this repository's `packs/` is loaded as non-official (data only). Without `--packs`, every folder in `packs/` is loaded. Without `--channel`, `channels/default.yaml` is used.
 - Every command takes `--json`, which prints machine-readable output (one JSON object per line).
 - A script line is `{ "wait": "3s" }`, `{ "next": true }`, or `{ "as": "streamer" | "<character>", "command": { … } }`.
 - `dndm play --save` writes the game state and a script of everything typed, so any session can be replayed.

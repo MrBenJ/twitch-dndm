@@ -29,7 +29,8 @@ Ground rules:
 - Only HP is a core stat. Packs register every other stat.
 - Only official packs (shipped in `packs/`) contain code. Streamer content
   is data only. Third-party code waits for a sandbox.
-- Pack code runs only on the server. The extension and overlay render data.
+- Pack code never runs in the extension or overlay; they render data. (It runs
+  in the server and the CLI.)
 - Plugins use the engine's RNG and clock. Never `Math.random` or `Date.now`.
 - IDs are namespaced (`starter:sword`). Every reference is checked at load.
   A pack may only reference packs it depends on (hard requirements). Channel
@@ -58,11 +59,11 @@ Plugin slots (registries)
 - [ ] Statuses (durations, stacking, modifier and reaction hooks)
 - [ ] Targeting rules
 - [ ] Passives
-- [ ] Stats (name, icon, default, growth per level)
 - [ ] Encounter kinds (fight is built in; others are plugins)
 - [ ] Monster behavior
 
 Content types (data, schema-checked)
+- [ ] Stats and slots (name, icon, default, growth per level)
 - [ ] Classes (self-contained bundle)
 - [ ] Abilities (cooldown + targeting + effect steps)
 - [ ] Items: gear (slot, stats, passives, grants class) and consumables (use ability, optional uses)
