@@ -131,4 +131,9 @@ Carries over most of spec rev 7 (`docs/superpowers/specs/2026-10-08-core-game-de
 - Paid content packs, Bits items (deterministic only), seasons / support pass
 - Sharing or selling channel packs
 - Third-party pack code in a sandbox
-- Pick the engine license (MIT vs AGPL)
+- Pick the engine license (MIT vs AGPL) before the repo goes public
+- Repo layout: one open-source monorepo (engine, packs/starter, cli, server,
+  dock, overlay, extension, shared protocol types); paid packs in a separate
+  private repo built against the public engine API
+- Redefine "official pack" for paid packs (Project 2): installed into the server
+  build by the project, likely signed, instead of "folders in `packs/`"
