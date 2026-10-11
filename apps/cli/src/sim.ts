@@ -143,10 +143,23 @@ export function simulate(o: SimOptions): SimReport {
 
 const MAX_RUNS = 100_000;
 
+/** A duration flag as milliseconds; bad input is a CliError naming the flag. */
+function flagDuration(flag: string, text: string): number {
+  try { return parseDuration(text); } catch (e) { throw new CliError(`${flag}: ${(e as Error).message}`); }
+}
+
 function parseReaction(text: string | undefined): [number, number] {
   if (!text) return [0, 0];
   const [lo, hi] = text.split('-');
-  return [parseDuration(lo!), parseDuration(hi ?? lo!)];
+  const range: [number, number] = [flagDuration('--reaction', lo!), flagDuration('--reaction', hi ?? lo!)];
+  if (range[0] > range[1]) throw new CliError('--reaction must be low-high with low ≤ high, like 1s-3s');
+  return range;
+}
+
+function parseMaxTime(text: string | undefined): number {
+  const ms = flagDuration('--max-time', text ?? '30m');
+  if (ms <= 0) throw new CliError('--max-time must be longer than 0');
+  return ms;
 }
 
 export async function simCommand(opts: SetupOpts & {
@@ -159,7 +172,7 @@ export async function simCommand(opts: SetupOpts & {
     const engine = await setup(opts);
     const report = simulate({
       engine, party: opts.party.split(','), vs: opts.vs, runs, seed: opts.seed,
-      reaction: parseReaction(opts.reaction), maxTime: parseDuration(opts.maxTime ?? '30m'),
+      reaction: parseReaction(opts.reaction), maxTime: parseMaxTime(opts.maxTime),
     });
     if (opts.json) {
       opts.write(JSON.stringify({ kind: 'sim', ...report }));

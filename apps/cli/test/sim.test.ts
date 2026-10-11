@@ -52,6 +52,18 @@ describe('dndm sim', () => {
     expect(lines[0]).toBe('error: --runs must be a whole number from 1 to 100000');
   });
 
+  it.each([
+    [{ maxTime: 'Infinity' }, "error: --max-time: Invalid duration 'Infinity' (use 500ms, 8s, 2m or 1h)"],
+    [{ maxTime: '0s' }, 'error: --max-time must be longer than 0'],
+    [{ reaction: 'nope' }, "error: --reaction: Invalid duration 'nope' (use 500ms, 8s, 2m or 1h)"],
+    [{ reaction: '1s-soon' }, "error: --reaction: Invalid duration 'soon' (use 500ms, 8s, 2m or 1h)"],
+    [{ reaction: '3s-1s' }, 'error: --reaction must be low-high with low ≤ high, like 1s-3s'],
+  ])('rejects bad durations %j', async (bad, message) => {
+    const lines: string[] = [];
+    expect(await simCommand({ party: 'fighter', vs: 'slime', runs: '1', seed: 1, ...bad, write: (l) => lines.push(l) })).toBe(2);
+    expect(lines[0]).toBe(message);
+  });
+
   it('the command prints a report and rejects bad input', async () => {
     const lines: string[] = [];
     expect(await simCommand({ party: 'fighter,tank', vs: 'slime', runs: '3', seed: 1, write: (l) => lines.push(l) })).toBe(0);
