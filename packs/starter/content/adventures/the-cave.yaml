@@ -1,0 +1,38 @@
+adventure: the-cave
+name: The Cave
+description: A short trip into a goblin cave. Uses every starter encounter kind.
+start: entrance
+nodes:
+  entrance:
+    story:
+      title: The Cave
+      text: A cold wind blows from the cave mouth. Something inside is snoring.
+      show-for: 10s
+    next: fork
+  fork:
+    vote:
+      prompt: Two tunnels. Which way?
+      choices: { left: The left tunnel (snoring), right: The right tunnel (lantern light) }
+      time: 30s
+    next: { left: goblin-fight, right: merchant }
+  goblin-fight:
+    fight: goblin-king
+    next: { won: trap, default: rest }
+  merchant:
+    use: wandering-merchant
+    next: trap
+  trap:
+    trap:
+      prompt: A tripwire glints in the torchlight. Dodge!
+      time: 20s
+      taps: 50%
+      penalty:
+        target: non-responders
+        steps:
+          - damage: { power: 15 }
+    next: treasure
+  treasure:
+    treasure: { gold: 25, heal: 50%, time: 30s }
+  rest:
+    story:
+      text: You limp back to camp to lick your wounds.

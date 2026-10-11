@@ -1,0 +1,7 @@
+{
+  "id": "starter",
+  "version": "1.0.0",
+  "name": "Starter Pack",
+  "license": "Same as the engine",
+  "depends": {}
+}

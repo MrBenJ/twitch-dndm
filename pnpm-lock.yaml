@@ -194,6 +194,16 @@ importers:
         specifier: 2.9.1
         version: 2.9.1
 
+  packs/starter:
+    dependencies:
+      '@dndm/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+    devDependencies:
+      '@dndm/pack-loader':
+        specifier: workspace:*
+        version: link:../../packages/pack-loader
+
 packages:
 
   '@esbuild/aix-ppc64@0.28.2':

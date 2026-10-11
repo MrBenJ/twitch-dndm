@@ -1,0 +1,33 @@
+item: sword
+name: Sword
+slot: weapon
+grants-class: fighter
+icon: art/icons/sword.svg
+---
+item: shield
+name: Shield
+slot: weapon
+grants-class: tank
+icon: art/icons/shield.svg
+---
+item: staff
+name: Staff
+slot: weapon
+grants-class: healer
+icon: art/icons/staff.svg
+---
+item: leather-armor
+name: Leather Armor
+slot: armor
+stats: { defense: 5 }
+price: 40
+---
+item: health-potion
+name: Health Potion
+use: drink-potion
+price: 15
+---
+item: smelling-salts
+name: Smelling Salts
+use: smelling-salts
+price: 10

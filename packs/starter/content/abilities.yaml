@@ -1,0 +1,91 @@
+ability: attack
+name: Attack
+description: A basic hit.
+cooldown: 10s
+target: enemy
+steps:
+  - damage: { power: "attack * random(1.0, 1.2)" }
+---
+ability: power-strike
+name: Power Strike
+description: Strike, then strike again harder.
+cooldown: 45s
+target: enemy
+steps:
+  - damage: { power: "attack * random(1.0, 1.2)" }
+  - damage: { power: "1.5 * attack * random(1.0, 1.2)" }
+---
+ability: guard
+name: Guard
+description: Halve the damage you take and draw the monster's attacks for 8 seconds.
+cooldown: 30s
+target: self
+steps:
+  - apply-status: { status: guarding, duration: 8s, reduction: 50, priority: 1 }
+---
+ability: heal
+name: Heal
+description: Heal an ally (or yourself).
+cooldown: 15s
+target: ally
+steps:
+  - heal: { amount: healing }
+---
+ability: revive
+name: Revive
+description: Bring a knocked-out ally back with 30% HP.
+cooldown: 60s
+target: knocked-out-ally
+steps:
+  - revive: { hp: 30% }
+---
+ability: cure
+name: Cure
+description: Wake an ally from drowsiness.
+cooldown: 20s
+target: ally
+steps:
+  - remove-status: { status: drowsy }
+---
+ability: drink-potion
+name: Drink Potion
+description: Heal yourself for 40.
+cooldown: 5s
+when: anytime
+target: self
+steps:
+  - heal: { amount: 40 }
+---
+ability: smelling-salts
+name: Smelling Salts
+description: Shake off drowsiness.
+cooldown: 5s
+when: anytime
+target: self
+steps:
+  - remove-status: { status: drowsy }
+---
+ability: club-swing
+name: Club Swing
+description: A heavy swing.
+cooldown: 0s
+target: random-enemies
+steps:
+  - damage: { power: attack }
+---
+ability: yawn
+name: Yawn
+description: A yawn so big it's catching. Drowsy for 30 seconds.
+cooldown: 0s
+target: random-enemies
+steps:
+  - apply-status: { status: drowsy, duration: 30s, multiplier: 1.5 }
+---
+ability: crushing-blow
+name: Crushing Blow
+description: A brutal hit that can knock someone out cold.
+cooldown: 0s
+target: random-enemies
+steps:
+  - damage: { power: 1.5 * attack }
+  - knock-out: { chance: 0.1 }

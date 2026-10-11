@@ -1,0 +1,30 @@
+monster: slime
+name: Slime
+hp: 80
+stats: { attack: 6, defense: 0, crit-chance: 0 }
+abilities: [club-swing]
+behavior: { weighted: { abilities: { club-swing: 1 }, targets-per: 5 } }
+interval: 15s
+rewards: { xp: 20, gold: 5 }
+drops: [{ item: health-potion, chance: 0.1 }]
+---
+monster: goblin-king
+name: Goblin King
+tags: [goblin]
+hp: 400
+stats: { attack: 12, defense: 10, crit-chance: 0 }
+abilities: [club-swing, yawn]
+behavior: { weighted: { abilities: { club-swing: 3, yawn: 1 }, targets-per: 5 } }
+interval: 20s
+rewards: { xp: 60, gold: 25 }
+drops: [{ item: health-potion, chance: 0.2 }]
+---
+monster: dozing-ogre
+name: Dozing Ogre
+hp: 600
+stats: { attack: 18, defense: 5, crit-chance: 0 }
+abilities: [club-swing, yawn, crushing-blow]
+behavior: { weighted: { abilities: { club-swing: 2, yawn: 2, crushing-blow: 1 }, targets-per: 5 } }
+interval: 25s
+rewards: { xp: 120, gold: 50 }
+drops: [{ item: leather-armor, chance: 0.15 }]
