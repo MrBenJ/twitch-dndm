@@ -116,7 +116,9 @@ export function respond(_rt: Runtime, _id: string, _input: unknown): void {
   throw new Rejection('Not implemented yet', 'not-implemented');
 }
 
-/** Filled in by Task 5. */
-export function kindWake(_rt: Runtime): void {
-  throw new Rejection('Not implemented yet', 'not-implemented');
+export function kindWake(rt: Runtime): void {
+  const enc = rt.game.session?.encounter;
+  if (!enc || isFight(enc)) return;
+  const kind = rt.reg.kinds.get(enc.kind)!;
+  enc.state = callPlugin(kind.pack, `${kind.id} advance`, () => kind.def.advance(makeCtx(rt, kind.pack), enc.state, enc.params));
 }

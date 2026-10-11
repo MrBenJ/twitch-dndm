@@ -7,7 +7,7 @@ import { buildRegistry, type Registry } from './registry';
 import { Runtime } from './runtime';
 import { settle } from './settle';
 import { type GameState, newGameState } from './state';
-import { advanceTo } from './time';
+import { advanceTo, nextWake } from './time';
 
 export type ApplyResult =
   | { ok: true; game: GameState; events: GameEvent[] }
@@ -20,6 +20,7 @@ export interface Engine {
   newGame(opts: { seed: number }): GameState;
   apply(game: GameState, cmd: Command, now: number): ApplyResult;
   advance(game: GameState, now: number): { game: GameState; events: GameEvent[] };
+  nextWakeTime(game: GameState): number | null;
 }
 
 export function toError(e: unknown): { code: string; message: string } | null {
@@ -59,5 +60,6 @@ export function createEngine(opts: { packs: PackBundle[]; channel: unknown }): E
       rt.game.clock = rt.now;
       return { game: rt.game, events: rt.events };
     },
+    nextWakeTime: (game) => nextWake(new Runtime(registry, structuredClone(game))),
   };
 }
