@@ -48,3 +48,14 @@ describe('resolveId', () => {
     expect(() => resolveId(twice, 'monster', 'slime')).toThrow("'slime' could be starter:slime or other:slime; write the full ID");
   });
 });
+
+describe('setup', () => {
+  it("doesn't import code from installed packs the channel leaves disabled", async () => {
+    const { mkdtempSync: mk, writeFileSync: wf } = await import('node:fs');
+    const dir = mk(join(tmpdir(), 'ch-'));
+    wf(join(dir, 'none.yaml'), 'packs: []\n');
+    const { setupBundles } = await import('../src/setup');
+    const bundles = await setupBundles({ channel: join(dir, 'none.yaml') });
+    expect(bundles.map((b) => [b.manifest.id, b.register === undefined])).toEqual([['starter', true]]);
+  });
+});

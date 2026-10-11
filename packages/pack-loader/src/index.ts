@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { ContentSource, PackBundle, PackDefinition, PackManifest } from '@dndm/engine';
@@ -32,19 +32,23 @@ function isOfficial(dir: string): boolean {
   return dirname(real) === packsRoot;
 }
 
-function walk(dir: string, out: string[]): void {
+/** Collects YAML files under `dir`. Symlinks are refused, so content can't reach outside its pack or loop. */
+function walk(dir: string, packDir: string, out: string[]): void {
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) walk(full, out);
+    const st = lstatSync(full);
+    if (st.isSymbolicLink()) throw new LoadError(`${relative(packDir, full)}: symlinks aren't allowed in pack content`);
+    if (st.isDirectory()) walk(full, packDir, out);
     else if (/\.ya?ml$/.test(name)) out.push(full);
   }
 }
 
 function readContent(dir: string): ContentSource[] {
   const root = join(dir, 'content');
-  if (!existsSync(root)) return [];
+  if (!existsSync(root) && !isLink(root)) return [];
+  if (isLink(root)) throw new LoadError(`${relative(dir, root)}: symlinks aren't allowed in pack content`);
   const files: string[] = [];
-  walk(root, files);
+  walk(root, dir, files);
   const out: ContentSource[] = [];
   for (const file of files.sort()) {
     const rel = relative(dir, file).split(sep).join('/');
@@ -64,7 +68,16 @@ function readContent(dir: string): ContentSource[] {
   return out;
 }
 
-export async function loadPack(dir: string): Promise<PackBundle> {
+function isLink(path: string): boolean {
+  try { return lstatSync(path).isSymbolicLink(); } catch { return false; }
+}
+
+export interface LoadOptions {
+  /** false: read the manifest and content but never import the pack's code. Default true. */
+  importCode?: boolean;
+}
+
+export async function loadPack(dir: string, opts: LoadOptions = {}): Promise<PackBundle> {
   const manifestPath = join(dir, 'pack.json');
   let manifest: PackManifest;
   try {
@@ -78,7 +91,7 @@ export async function loadPack(dir: string): Promise<PackBundle> {
   const entry = join(dir, 'src', 'index.ts');
   const hasCode = existsSync(entry);
   const bundle: PackBundle = { manifest, official, content, ...(hasCode ? { hasCode } : {}) };
-  if (hasCode && official) {
+  if (hasCode && official && opts.importCode !== false) {
     const mod = (await import(pathToFileURL(entry).href)) as { default?: PackDefinition };
     if (!mod.default || typeof mod.default.register !== 'function') {
       throw new LoadError(`${entry}: the default export must be definePack({ register(api) { ... } })`);
@@ -88,9 +101,18 @@ export async function loadPack(dir: string): Promise<PackBundle> {
   return bundle;
 }
 
-export async function loadPacks(dirs: string[]): Promise<PackBundle[]> {
+/**
+ * Loads several packs. With `enabled`, only those packs' code is imported; the rest are still read
+ * (manifest and content) so references to them can go dormant, but none of their code runs.
+ */
+export async function loadPacks(dirs: string[], opts: { enabled?: Iterable<string> } = {}): Promise<PackBundle[]> {
+  const enabled = opts.enabled ? new Set(opts.enabled) : null;
   const out: PackBundle[] = [];
-  for (const dir of dirs) out.push(await loadPack(dir));
+  for (const dir of dirs) {
+    let id: string | undefined;
+    try { id = (JSON.parse(readFileSync(join(dir, 'pack.json'), 'utf8')) as { id?: string })?.id; } catch { /* loadPack reports it */ }
+    out.push(await loadPack(dir, { importCode: !enabled || (id !== undefined && enabled.has(id)) }));
+  }
   return out;
 }
 

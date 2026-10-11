@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { listPackDirs, loadChannel, loadPack, LoadError, repoRoot } from '../src';
+import { listPackDirs, loadChannel, loadPack, loadPacks, LoadError, repoRoot } from '../src';
 
 function makePack(root: string, id: string, files: Record<string, string>): string {
   const dir = join(root, id);
@@ -66,5 +66,46 @@ describe('repo helpers', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ch-'));
     writeFileSync(join(dir, 'c.yaml'), 'packs: [starter]\nsettings:\n  party-cap: 3\n');
     expect(loadChannel(join(dir, 'c.yaml'))).toEqual({ packs: ['starter'], settings: { 'party-cap': 3 } });
+  });
+});
+
+describe('content stays inside the pack (review round 2)', () => {
+  it('rejects a symlinked YAML file pointing outside the pack', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'packs-'));
+    writeFileSync(join(root, 'secret.yaml'), 'stat: x\nname: X\ndefault: 1\n');
+    const dir = makePack(root, 'ee', { 'content/a.yaml': 'slot: hand\nname: Hand\n' });
+    symlinkSync(join(root, 'secret.yaml'), join(dir, 'content', 'b.yaml'));
+    await expect(loadPack(dir)).rejects.toThrow(/symlink/);
+  });
+
+  it('rejects a content folder that is a symlink to somewhere else', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'packs-'));
+    mkdirSync(join(root, 'elsewhere'));
+    writeFileSync(join(root, 'elsewhere', 'a.yaml'), 'slot: hand\nname: Hand\n');
+    const dir = makePack(root, 'ff', {});
+    symlinkSync(join(root, 'elsewhere'), join(dir, 'content'));
+    await expect(loadPack(dir)).rejects.toThrow(/symlink/);
+  });
+
+  it('a symlink cycle is an error, not a hang', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'packs-'));
+    const dir = makePack(root, 'gg', { 'content/sub/a.yaml': 'slot: hand\nname: Hand\n' });
+    symlinkSync(join(dir, 'content'), join(dir, 'content', 'sub', 'loop'));
+    await expect(loadPack(dir)).rejects.toThrow(/symlink/);
+  });
+});
+
+describe('code is imported only for enabled packs (review round 2)', () => {
+  const starter = () => listPackDirs().find((d) => d.endsWith(join('packs', 'starter')))!;
+  it('loadPack can skip importing an official pack\'s code', async () => {
+    const b = await loadPack(starter(), { importCode: false });
+    expect(b).toMatchObject({ official: true, hasCode: true });
+    expect(b.register).toBeUndefined();
+    expect(b.content.length).toBeGreaterThan(0);
+  });
+  it('loadPacks imports code only for the enabled packs', async () => {
+    expect((await loadPacks([starter()], { enabled: [] }))[0]!.register).toBeUndefined();
+    expect((await loadPacks([starter()], { enabled: ['starter'] }))[0]!.register).toBeTypeOf('function');
+    expect((await loadPacks([starter()]))[0]!.register).toBeTypeOf('function');
   });
 });
