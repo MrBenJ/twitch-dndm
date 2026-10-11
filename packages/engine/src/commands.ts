@@ -1,4 +1,6 @@
+import { z } from 'zod';
 import { go, skipTo, startAdventure, stopAdventure } from './adventure';
+import { Rejection } from './errors';
 import { endEncounterCommand, respond, startEncounterCommand } from './encounters';
 import { holdMonster, monsterActNow, releaseMonster, setMonsterHp, spawnMonster } from './fight';
 import { equip, unequip } from './gear';
@@ -55,6 +57,61 @@ export type Command =
   | { type: 'postMessage'; text: string };
 
 export const VIEWER_COMMANDS = ['join', 'leave', 'use', 'equip', 'unequip', 'respond'] as const;
+
+const id = z.string().min(1);
+const ref = z.object({ kind: z.enum(['character', 'monster']), id }).strict();
+const amount = z.number();
+const cmd = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.object({ type: z.literal(type), ...shape }).strict();
+
+const COMMAND_SCHEMAS = [
+  cmd('join', { character: id, name: z.string().optional(), pick: id.optional() }),
+  cmd('leave', { character: id }),
+  cmd('use', { character: id, ability: id, chosen: ref.nullable().optional() }),
+  cmd('equip', { character: id, item: id }),
+  cmd('unequip', { character: id, slot: id }),
+  cmd('respond', { character: id, input: z.unknown() }),
+  cmd('openSession', {}),
+  cmd('closeSession', {}),
+  cmd('removePlayer', { character: id }),
+  cmd('banPlayer', { character: id }),
+  cmd('unbanPlayer', { character: id }),
+  cmd('spawnMonster', { monster: id }),
+  cmd('startEncounter', { encounter: z.union([id, z.record(z.string(), z.unknown())]) }),
+  cmd('endEncounter', { outcome: id.optional() }),
+  cmd('startAdventure', { adventure: id }),
+  cmd('go', {}),
+  cmd('skipTo', { node: id }),
+  cmd('stopAdventure', {}),
+  cmd('healPlayer', { character: id, amount: z.union([amount, z.literal('full')]) }),
+  cmd('healParty', {}),
+  cmd('revivePlayer', { character: id }),
+  cmd('reviveAll', {}),
+  cmd('applyStatus', { target: ref, status: id, duration: z.union([z.string(), z.number()]).nullable().optional(), params: z.unknown().optional() }),
+  cmd('removeStatus', { target: ref, status: id }),
+  cmd('knockOut', { character: id }),
+  cmd('monsterActNow', {}),
+  cmd('holdMonster', {}),
+  cmd('releaseMonster', {}),
+  cmd('setMonsterHp', { value: amount }),
+  cmd('giveXp', { target: id, amount }),
+  cmd('giveGold', { target: id, amount }),
+  cmd('giveItem', { target: id, item: id }),
+  cmd('postMessage', { text: z.string() }),
+] as const;
+const BY_TYPE = new Map(COMMAND_SCHEMAS.map((s) => [s.shape.type.value as string, s as z.ZodType]));
+
+/** Checks an untrusted command's shape. Throws Rejection('invalid-input') with the first problem. */
+export function checkCommand(raw: unknown): Command {
+  const type = typeof raw === 'object' && raw !== null ? (raw as { type?: unknown }).type : undefined;
+  const schema = typeof type === 'string' ? BY_TYPE.get(type) : undefined;
+  if (!schema) throw new Rejection(`Unknown command '${String(type)}'`, 'invalid-input');
+  const r = schema.safeParse(raw);
+  if (!r.success) {
+    const i = r.error.issues[0]!;
+    throw new Rejection(`${i.path.join('.') || type}: ${i.message}`, 'invalid-input');
+  }
+  return r.data as Command;
+}
 
 export function runCommand(rt: Runtime, cmd: Command): void {
   switch (cmd.type) {

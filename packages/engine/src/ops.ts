@@ -26,7 +26,7 @@ function pair(source: EntityRef | null, target: EntityRef): { ref: EntityRef; ro
 
 export function dealDamage(rt: Runtime, source: EntityRef | null, target: EntityRef, amount: number, tags: string[]): number {
   if (!entityExists(rt, target) || isKnockedOut(rt, target)) return 0;
-  let v = amount;
+  let v = Number.isFinite(amount) ? amount : 0;
   if (source && entityExists(rt, source)) v = modify(rt, source, 'damageDealt', v, { source, target, tags });
   v = modify(rt, target, 'damageTaken', v, { source, target, tags });
   const dmg = Math.max(0, Math.round(v));
@@ -41,7 +41,7 @@ export function dealDamage(rt: Runtime, source: EntityRef | null, target: Entity
 
 export function heal(rt: Runtime, source: EntityRef | null, target: EntityRef, amount: number): number {
   if (!entityExists(rt, target) || isKnockedOut(rt, target)) return 0;
-  let v = amount;
+  let v = Number.isFinite(amount) ? amount : 0;
   if (source && entityExists(rt, source)) v = modify(rt, source, 'healingGiven', v, { source, target });
   v = modify(rt, target, 'healingReceived', v, { source, target });
   const before = hp(rt, target);

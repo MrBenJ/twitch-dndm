@@ -72,7 +72,16 @@ export function dueItems(rt: Runtime): Due[] {
   if (enc && !isFight(enc)) {
     const kind = rt.reg.kinds.get(enc.kind);
     if (kind) {
-      const at = callPlugin(kind.pack, `${kind.id} wakeAt`, () => kind.def.wakeAt(enc.state));
+      let at: number | null;
+      try {
+        at = callPlugin(kind.pack, `${kind.id} wakeAt`, () => kind.def.wakeAt(enc.state));
+        if (at !== null && !Number.isFinite(at)) throw new PluginError(kind.pack, `${kind.id} wakeAt`, new Error(`returned ${at}`));
+      } catch (e) {
+        if (!(e instanceof PluginError)) throw e;
+        // A broken wakeAt is due now, and fails, so runGuarded force-ends the encounter.
+        out.push({ at: rt.now, order: 4, key: 'wake', run: () => { throw e; }, skip: (r) => forceEnd(r) });
+        at = null;
+      }
       if (at !== null) out.push({ at, order: 4, key: 'wake', run: (r) => kindWake(r), skip: (r) => forceEnd(r) });
     }
   }
@@ -107,10 +116,23 @@ export function runGuarded(rt: Runtime, run: () => void, skip: () => void): void
 }
 
 export function advanceTo(rt: Runtime, target: number): void {
+  let lastWake: number | null = null;
   for (let i = 0; ; i++) {
     if (i > 100_000) throw new Error('Too many timed events at once; a pack may be scheduling in a loop');
     const next = dueItems(rt)[0];
     if (!next || next.at > target) break;
+    if (next.key === 'wake') {
+      if (next.at === lastWake) {
+        // The kind woke up and asked to wake again at the same moment: it would spin forever.
+        rt.now = Math.max(rt.now, next.at);
+        const kind = rt.game.session?.encounter?.kind ?? 'encounter';
+        forceEnd(rt);
+        rt.emit('core:plugin-error', `${kind} kept waking at the same time without moving on, so it was stopped`, {});
+        settle(rt);
+        continue;
+      }
+      lastWake = next.at;
+    }
     rt.now = Math.max(rt.now, next.at);
     rt.depth = 0;
     rt.limitHit = false;

@@ -25,10 +25,22 @@ export function modify<K extends keyof Modifiers>(
   for (const h of holders(rt, holder)) {
     const fn = h.hooks.modify?.[point] as ((value: unknown, info: unknown) => unknown) | undefined;
     if (!fn) continue;
-    v = callPlugin(h.pack, `${h.label} modify.${point}`, () =>
+    const next = callPlugin(h.pack, `${h.label} modify.${point}`, () =>
       fn(v, { ctx: makeCtx(rt, h.pack), holder, params: h.params, ...extra })) as typeof v;
+    if (validResult(point, next)) v = next;
+    else rt.emit('core:plugin-error', `${h.label} modify.${point} returned ${JSON.stringify(next) ?? 'nothing'}; it was ignored`, {});
   }
   return v;
+}
+
+/** A modifier's result must keep the value's shape; anything else (NaN, undefined, Infinity) is ignored. */
+function validResult(point: keyof Modifiers, v: unknown): boolean {
+  if (point === 'canUse') return v === true || typeof v === 'string';
+  if (point === 'rewardsReceived') {
+    const r = v as { xp?: unknown; gold?: unknown } | null;
+    return !!r && typeof r.xp === 'number' && Number.isFinite(r.xp) && typeof r.gold === 'number' && Number.isFinite(r.gold);
+  }
+  return typeof v === 'number' && Number.isFinite(v);
 }
 
 export function react(rt: Runtime, event: ReactionEvent, recipients: { ref: EntityRef; role: ReactionRole }[]): void {

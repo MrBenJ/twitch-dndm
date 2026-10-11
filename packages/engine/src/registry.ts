@@ -54,6 +54,8 @@ export interface BuildState {
   issues: Issue[];
   channel: ChannelConfig;
   enabled: Set<string>;
+  /** Every pack bundle handed to buildRegistry, enabled or not. */
+  installed: Set<string>;
   depends: Map<string, Set<string>>;
   raw: Map<ContentType, Map<string, RawDoc>>;
   deleted: Set<string>;
@@ -181,6 +183,7 @@ function applyOverrides(st: BuildState): void {
     const types = typeWord ? [typeWord] : CONTENT_TYPES;
     const matches = types.map((t) => st.raw.get(t)!.get(target)).filter((d): d is RawDoc => !!d);
     if (matches.length === 0) {
+      if (pack !== CHANNEL && pack !== CORE && !st.installed.has(pack)) { issue('error', `there's no pack called '${pack}'`); continue; }
       const dormant = (pack !== CHANNEL && pack !== CORE && !st.enabled.has(pack)) || (pack === CHANNEL && st.deleted.has(target));
       if (dormant) issue('warning', `override for ${target} is kept but ignored: it's dormant`);
       else issue('error', `nothing called '${target}' to override`);
@@ -223,6 +226,7 @@ export function buildRegistry(bundles: PackBundle[], channelRaw: unknown): Regis
     issues: [],
     channel,
     enabled: new Set(channel.packs),
+    installed: new Set(bundles.map((b) => b.manifest.id)),
     depends: new Map(),
     raw: new Map(CONTENT_TYPES.map((t) => [t, new Map()])),
     deleted: new Set(channel.channelPack.deleted.map((d) => (d.includes(':') ? d : fullId(CHANNEL, d)))),

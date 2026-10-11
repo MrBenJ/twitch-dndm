@@ -59,7 +59,7 @@ export function startEncounterCommand(rt: Runtime, encounter: string | Record<st
   return startEncounter(rt, { kind: kindId, params }, null);
 }
 
-function allowedOutcomes(rt: Runtime): string[] {
+export function allowedOutcomes(rt: Runtime): string[] {
   const enc = rt.game.session!.encounter!;
   if (isFight(enc)) return ['won', 'ended'];
   const kind = rt.reg.kinds.get(enc.kind)!;

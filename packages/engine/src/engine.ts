@@ -1,4 +1,4 @@
-import { type Command, runCommand } from './commands';
+import { checkCommand, type Command, runCommand } from './commands';
 import { type Description, describe } from './describe';
 import { EngineError, type Issue, PluginError, Rejection } from './errors';
 import type { GameEvent } from './events';
@@ -48,7 +48,7 @@ export function createEngine(opts: { packs: PackBundle[]; channel: unknown }): E
         advanceTo(rt, t);
         rt.depth = 0;
         rt.limitHit = false;
-        runCommand(rt, cmd);
+        runCommand(rt, checkCommand(cmd));
         settle(rt);
         rt.game.clock = t;
         return { ok: true, game: rt.game, events: rt.events };

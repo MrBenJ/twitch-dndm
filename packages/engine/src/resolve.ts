@@ -44,6 +44,7 @@ export function makeNormalizeCtx(
       if (pack !== null) {
         if (pack !== fromPack && pack !== CORE) {
           if (isChannel) {
+            if (!st.installed.has(pack)) { ctx.issue(path, `'${raw}': there's no pack called '${pack}'`); return null; }
             if (!st.enabled.has(pack)) { ctx.markDormant(`${type} ${raw}`); return null; }
           } else if (!st.depends.get(fromPack)?.has(pack)) {
             ctx.issue(path, `'${raw}': ${fromPack} doesn't depend on ${pack}`);

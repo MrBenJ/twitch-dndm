@@ -1,14 +1,15 @@
 import {
   alliesOf, enemiesOf, entityName, entityTags, hp, isKnockedOut, level, maxHp, partyRefs, stat, statusViews, storesOf,
 } from './entities';
-import { evaluateFormula, FormulaError, mapFormulaStats, parseFormula, printFormula } from './formula';
+import { evaluateFormula, FormulaError, formulaVars, mapFormulaStats, parseFormula, printFormula } from './formula';
+import { allowedOutcomes } from './encounters';
 import { modify } from './hooks';
 import { CORE, type RefType } from './ids';
 import {
   applyStatus, dealDamage, giveItem, giveRewards, heal, knockOut, removeStatus, revive, runSteps, setStore, spendGold, useAbility,
 } from './ops';
 import type { Ctx, EntityRef } from './pack';
-import { type NormalizeCtx, normalizeParams, p, type Step } from './params';
+import { type NormalizeCtx, normalizeParams, p, type StatusApplication, type Step } from './params';
 import type { Registry } from './registry';
 import type { Runtime } from './runtime';
 
@@ -88,7 +89,12 @@ export function makeCtx(rt: Runtime, pack: string): Ctx {
     giveRewards: (c, r) => giveRewards(rt, c, r),
     spendGold: (c, n) => spendGold(rt, c, n),
     giveItem: (c, i, n) => giveItem(rt, c, R('item', i), n ?? 1),
-    endEncounter: (outcome) => { rt.pendingEnd = outcome; },
+    endEncounter: (outcome) => {
+      if (!rt.game.session?.encounter) throw new Error('No encounter is running');
+      const allowed = allowedOutcomes(rt);
+      if (!allowed.includes(outcome)) throw new Error(`This encounter can't end with '${outcome}' (outcomes: ${allowed.join(', ')})`);
+      rt.pendingEnd = outcome;
+    },
     emit: (type, data, text) => {
       if (!type.startsWith(`${pack}:`)) throw new Error(`Custom event types must start with '${pack}:'`);
       rt.emit(type, text, data);
@@ -97,39 +103,62 @@ export function makeCtx(rt: Runtime, pack: string): Ctx {
   };
 }
 
-/** Normalizes runtime input (viewer responses, streamer status params) against the registry. */
+/**
+ * Normalizes runtime input (viewer responses, streamer commands, inline encounters) against the registry,
+ * with the same checks content gets at load time: known IDs, known stats in formulas, the no-source rule.
+ */
 export function runtimeNormalizeCtx(rt: Runtime, pack: string): NormalizeCtx & { issues: string[] } {
+  const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
   const ctx = {
     issues: [] as string[],
     issue(path: string, message: string) { ctx.issues.push(path ? `${path}: ${message}` : message); },
     ref(type: RefType, raw: string, path: string): string | null {
       const id = resolveFor(rt, pack, type, raw);
       if ((rt.reg[MAPS[type]] as Map<string, unknown>).has(id)) return id;
-      ctx.issue(path, `Unknown ${type} '${raw}'`);
+      ctx.issue(path, `Unknown ${type === 'encounterKind' ? 'encounter kind' : type} '${raw}'`);
       return null;
     },
-    formula(text: string, path: string): string | null {
-      try {
-        const node = mapFormulaStats(parseFormula(text), (s) => resolveFor(rt, pack, 'stat', s));
-        return printFormula(node);
-      } catch (e) {
+    formula(text: string, path: string, noSource: boolean): string | null {
+      let node;
+      try { node = parseFormula(text); } catch (e) {
         if (e instanceof FormulaError) { ctx.issue(path, e.message); return null; }
         throw e;
       }
-    },
-    steps(value: unknown, path: string): Step[] | null {
-      if (!Array.isArray(value)) { ctx.issue(path, 'must be a list of steps'); return null; }
-      return value.flatMap((step, i) => {
-        const [key, params] = Object.entries(step as object)[0] ?? ['', {}];
-        const effect = ctx.ref('effect', key, `${path}[${i}]`);
-        if (!effect) return [];
-        const def = rt.reg.effects.get(effect)!.def;
-        return [{ effect, params: normalizeParams(def.params ?? p.object({}), params, ctx, `${path}[${i}].${key}`) }];
+      if (noSource && formulaVars(node).some((v) => v.side === 'source')) {
+        ctx.issue(path, 'This formula has no source; use target.<stat> or numbers');
+        return null;
+      }
+      let ok = true;
+      const mapped = mapFormulaStats(node, (s) => {
+        const full = ctx.ref('stat', s, path);
+        if (!full) ok = false;
+        return full ?? s;
       });
+      return ok ? printFormula(mapped) : null;
     },
-    statusApplication(): null {
-      ctx.issue('', 'status applications are not accepted here');
-      return null;
+    steps(value: unknown, path: string, noSource: boolean): Step[] | null {
+      if (!Array.isArray(value)) { ctx.issue(path, 'must be a list of steps'); return null; }
+      const out: Step[] = [];
+      value.forEach((step, i) => {
+        const sp = `${path}[${i}]`;
+        if (!isObj(step) || Object.keys(step).length !== 1) { ctx.issue(sp, 'each step is one effect with its params, like { poke: { ... } }'); return; }
+        const [key, params] = Object.entries(step)[0]!;
+        const effect = ctx.ref('effect', key, sp);
+        if (!effect) return;
+        const def = rt.reg.effects.get(effect)!.def;
+        out.push({ effect, params: normalizeParams(def.params ?? p.object({}), params ?? {}, ctx, `${sp}.${key}`, noSource) });
+      });
+      return out;
+    },
+    statusApplication(value: unknown, path: string, noSource: boolean): StatusApplication | null {
+      if (!isObj(value)) { ctx.issue(path, 'must be a map with a status'); return null; }
+      const { status, duration, ...rest } = value;
+      if (typeof status !== 'string') { ctx.issue(`${path}.status`, 'required'); return null; }
+      const id = ctx.ref('status', status, `${path}.status`);
+      if (!id) return null;
+      const d = duration === undefined || duration === null ? null : normalizeParams(p.duration(), duration, ctx, `${path}.duration`);
+      const def = rt.reg.statuses.get(id)!.def;
+      return { status: id, duration: (d as number | null | undefined) ?? null, params: normalizeParams(def.params ?? p.object({}), rest, ctx, path, noSource) };
     },
   };
   return ctx;

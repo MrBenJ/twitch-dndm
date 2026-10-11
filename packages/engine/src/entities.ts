@@ -161,7 +161,8 @@ export function maxHp(rt: Runtime, e: EntityRef): number {
     const ch = charOf(rt, e);
     raw = rt.settings.baseHp + rt.settings.hpPerLevel * (ch.level - 1) + bonuses(rt, ch, CORE_HP);
   }
-  return Math.max(1, Math.round(modified(rt, e, CORE_HP, raw)));
+  const v = modified(rt, e, CORE_HP, raw);
+  return Math.max(1, Math.round(Number.isFinite(v) ? v : raw));
 }
 
 /** The HP the game uses: 0 while knocked out, otherwise saved HP capped at max HP. */

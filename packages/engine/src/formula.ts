@@ -36,7 +36,9 @@ function lex(text: string): Tok[] {
     if (/\s/.test(c)) { i++; continue; }
     if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(text[i + 1] ?? ''))) {
       const m = /^(\d*\.\d+|\d+)/.exec(text.slice(i))!;
-      toks.push({ t: 'num', v: Number(m[1]), pos: i });
+      const v = Number(m[1]);
+      if (!Number.isFinite(v)) throw new FormulaError(`Number too large at ${i + 1}`);
+      toks.push({ t: 'num', v, pos: i });
       i += m[1]!.length;
       if (isLetter(text[i])) throw new FormulaError(`Unexpected '${text[i]}' after a number at ${i + 1}`);
       continue;
@@ -155,9 +157,18 @@ export function parseFormula(text: string): FormulaNode {
   return node;
 }
 
+/** A number as plain decimal text (never exponent notation, which formulas can't read). */
+function plainNumber(v: number): string {
+  const s = String(v);
+  if (!s.includes('e')) return s;
+  if (Math.abs(v) >= 1) return BigInt(v).toString(); // doubles this large are always whole numbers
+  const m = /^(-?)(\d)(?:\.(\d+))?e-(\d+)$/.exec(s)!;
+  return `${m[1]}0.${'0'.repeat(Number(m[4]) - 1)}${m[2]}${m[3] ?? ''}`;
+}
+
 export function printFormula(node: FormulaNode): string {
   switch (node.k) {
-    case 'num': return String(node.v);
+    case 'num': return plainNumber(node.v);
     case 'var': {
       const name = node.what === 'stat' ? node.stat! : node.what;
       return node.side === 'target' ? `target.${name}` : name;
