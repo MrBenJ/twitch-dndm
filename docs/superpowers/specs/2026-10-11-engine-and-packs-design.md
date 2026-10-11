@@ -1,7 +1,7 @@
 # twitch-dndm — Project 1: Engine and Packs
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 5)
+**Status:** Draft for owner review (revision 6)
 **Roadmap:** `docs/roadmap.md`, Project 1
 **Replaces:** the game rules in `2026-10-08-core-game-design.md` (rev 7) §4 and §5.1. The rest of rev 7 is the starting point for Project 2 (server and live play).
 
@@ -264,7 +264,6 @@ Started by `startEncounter` with a fight (an encounter document or inline `fight
 | Outcome | Caused by | Rewards |
 |---|---|---|
 | `won` | the monster is knocked out (HP reaches 0, or an effect knocks it out, §6.6), or `endEncounter(won)` | yes |
-| `fled` | `flee` | no |
 | `ended` | `endEncounter(ended)` or `closeSession` | no |
 
 When a fight ends, in this order:
@@ -627,7 +626,7 @@ All three use `targets-per: 5` and set `crit-chance: 0` (monster hits don't crit
 
 ### 9.7 Sample adventure
 
-`the-cave` (§8.6) is the adventure in success criterion 1. Its main path is story → vote → (fight or shop) → trap → treasure; fleeing or ending the fight goes to `rest`. Between its two vote branches it uses every starter kind.
+`the-cave` (§8.6) is the adventure in success criterion 1. Its main path is story → vote → (fight or shop) → trap → treasure; the streamer ending the fight without a win goes to `rest`. Between its two vote branches it uses every starter kind.
 
 ## 10. Validation
 
@@ -671,7 +670,7 @@ engine.describe()                                     // everything registered, 
 | Area | Commands |
 |---|---|
 | Session | `openSession`, `closeSession`, `removePlayer(character)`, `banPlayer(character)`, `unbanPlayer(character)` |
-| Encounters | `spawnMonster(monster)`, `startEncounter(encounter \| inline)`, `endEncounter(outcome?)`, `flee` |
+| Encounters | `spawnMonster(monster)`, `startEncounter(encounter \| inline)`, `endEncounter(outcome?)` |
 | Adventures | `startAdventure(adventure)`, `go`, `skipTo(node)`, `stopAdventure` |
 | Healing | `healPlayer(character, amount \| full)`, `healParty`, `revivePlayer(character)`, `reviveAll` |
 | Statuses | `applyStatus(target, status, duration?, params?)`, `removeStatus(target, status)`, `knockOut(character)` |
