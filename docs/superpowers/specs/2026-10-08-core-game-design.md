@@ -1,7 +1,7 @@
 # twitch-dndm — Milestone 1: Core Game Design
 
 **Date:** 2026-10-08
-**Status:** Draft for review (revision 4)
+**Status:** Draft for review (revision 5)
 
 ## 1. Purpose
 
@@ -22,14 +22,14 @@ The original project (`../twitch-emitter`) is a reference for game feel only. No
 - **Monsters fight back.** They damage players, can make them drowsy (longer cooldowns), and can knock them out.
 - **Classes, HP and gear.** A player's equipped weapon decides their class. HP carries over between fights.
 - **Multi-channel from day one.** Any streamer can sign up; every channel is its own world.
-- **Everything is configurable.** Every rule, number, base stat, class, action, item and monster is data in a per-channel **Ruleset** (§4). Rules that change behavior are on/off switches or numbers in the ruleset (§4.9). The one exception is the **game vocabulary** (§4.1): effect types, target types, statuses and item slots. Adding a new one needs code until the Programmability milestone. Server protections such as the request rate limit (§12) are not game rules. The game ships with a default ruleset (three classes, starter gear, starter monsters) as an example; a streamer can change or replace any part of it. Later, content packs are bundles of ruleset pieces.
-- **Every streamer action is a named command** (§5), so later Stream Deck buttons and scripts can trigger anything the streamer can do.
+- **Deeply configurable.** Every number, base stat, class, action, item and monster is data in a per-channel **Ruleset** (§4), along with the on/off switches listed in §4.9. The rest of the behavior described in §4, and the **game vocabulary** (§4.1: effect types, target types, statuses and item slots), is fixed in this milestone; new switches are added when a real need appears, and extending the vocabulary belongs to the Programmability milestone. Server protections such as the request rate limit (§12) are not game rules. The game ships with a default ruleset (three classes, starter gear, starter monsters) as an example; a streamer can change or replace any part of it. Later, content packs are bundles of ruleset pieces.
+- **Every action taken while running or configuring the game is a named command** (§5), so later Stream Deck buttons and scripts can trigger it. Two account actions are exceptions because they need the streamer to log in to Twitch in a browser: signing up (§8) and connecting chat bans (§8).
 
 ### 1.3 Success criteria
 
 1. dj_teknal can run a full adventure live: start, several fights, end. Viewers join and play from desktop and mobile through the extension, with nothing typed in chat.
 2. A second streamer can sign up, install the extension, and run their own adventure with separate players, ruleset and monsters.
-3. A streamer can change any rule, stat, class, item or monster without a code change (the game vocabulary excepted, §4.1).
+3. A streamer can change any number, stat, class, action, item, monster or §4.9 switch without a code change.
 4. A server restart in the middle of a fight resumes that fight from its last saved state.
 5. The overlay and extension look finished without any illustrated art.
 
@@ -111,7 +111,7 @@ The original project (`../twitch-emitter`) is a reference for game feel only. No
 
 ### 4.1 The Ruleset
 
-Each channel has one Ruleset: a single JSON object, validated on every change. Everything in §4 is defined in it; the values written in this section are the **default ruleset**. Sections:
+Each channel has one Ruleset: a single JSON object, validated on every change. Every number, stat, class, action, item, monster and switch in §4 is defined in it; those values as written in this section are the **default ruleset**. Behavior described in prose and not listed in §4.9 is fixed. Sections:
 
 - **rules**: all numeric and on/off rules (listed in §4.9).
 - **baseStats**: stats every player has before class and gear: max HP, damage, heal power, crit chance, crit multiplier, damage reduction %.
@@ -176,7 +176,7 @@ Everything built from the vocabulary (classes, actions, items, numbers) is rules
 
 - **Weapon on joining**: a player who has never equipped a weapon picks one when they join, at any time. A player who already has an equipped weapon joins with it; they can change it only when gear changes are allowed (§4.4).
 
-- Party size cap: `rules.partyCap`, default 50.
+- Party size cap: `rules.partyCap`, default none (unlimited), so the whole audience can play. A streamer can set a cap; when the party is full, further joins are rejected with "The party is full".
 - **Active** = in the party and not knocked out.
 
 **Default stats:**
@@ -237,6 +237,8 @@ When a combat encounter ends:
 - **Won** (monster HP reaches 0, or streamer `endEncounter(withRewards: true)`): rewards go to eligible members.
 - **Fled / ended without rewards**: no rewards.
 
+Rewards are decided and paid **before** idle removal runs.
+
 **Eligible** = in the party when the encounter ended and, if `rules.rewardsRequireAction` is on (default), performed at least one action during it.
 
 **Idle removal** (`rules.autoRemoveIdle`, default on): at the end of every combat encounter, members who performed no action during it are removed from the party. Exemption (if `rules.knockedOutExemptFromIdle` is on, default): a member who was knocked out for the whole time they were in the encounter stays in the party (but isn't eligible when `rewardsRequireAction` is on). A member who joined mid-fight is judged from when they joined. Removed players keep all progress.
@@ -252,7 +254,7 @@ When a combat encounter ends:
 
 | Key | Default |
 |---|---|
-| `partyCap` | 50 |
+| `partyCap` | none (unlimited) |
 | `allowJoinMidFight` | on |
 | `autoRemoveIdle` | on |
 | `healBetweenFights` | off |
@@ -272,7 +274,7 @@ When a combat encounter ends:
 
 ## 5. Streamer commands
 
-Every streamer action is a named command sent to the command API. The dock and sign-up page use it now; Stream Deck and scripts use the same API later.
+Every action taken while running or configuring the game is a named command sent to the command API (exceptions: signing up and connecting chat bans, §1.2). The dock and sign-up page use it now; Stream Deck and scripts use the same API later.
 
 ### 5.1 Game commands (game-state changes handled by the engine)
 
@@ -287,7 +289,7 @@ Every streamer action is a named command sent to the command API. The dock and s
 | Feed | `postMessage(text)` |
 
 - Each emits an event shown on the overlay feed.
-- `monsterStrikeNow` works in any combat state, including while held (§4.2). It does nothing if no member is active.
+- `monsterStrikeNow` works while fighting, including while held (§4.2). While waiting (no member active) it is rejected with "No one to strike" and emits no event.
 - `spawnMonster` works only while resting during an adventure. `flee` and `endEncounter` end the current combat encounter and apply §4.7.
 - `holdMonster` / `releaseMonster`: see §4.2.
 - `banPlayer` removes the player from the party and blocks them from joining this channel's game; the engine applies this, and it is saved and shown on the feed like any command. With `alsoBanFromChat`, the server then calls the Twitch Ban User API with the streamer's token. The command always succeeds once the game ban is applied; if the chat ban couldn't be done (not connected, or the Twitch call failed), the response includes a warning saying so.
@@ -300,7 +302,7 @@ Every streamer action is a named command sent to the command API. The dock and s
 | Monsters | `createMonster(template)`, `updateMonster(id, patch)`, `deleteMonster(id)`, `uploadMonsterImage(id, file)` (PNG, GIF or WebP, ≤ 2 MB), `removeMonsterImage(id)` |
 | Access | `regenerateDockUrl`, `regenerateOverlayUrl`, `disconnectChatBans` |
 
-Connecting chat bans is the one streamer action that isn't a command: it needs the streamer to log in to Twitch in a browser (§8).
+Signing up and connecting chat bans are not commands: both need the streamer to log in to Twitch in a browser (§8).
 
 - Every ruleset change is validated (§4.1). Invalid changes are rejected with the list of errors.
 - `uploadMonsterImage` is sent to the command API as a multipart request; every other command is JSON.
@@ -329,7 +331,7 @@ A web page added as an OBS custom browser dock. Tabs:
 
 **Player rows are the source of truth for player progress.** Every change to any field in `players` or `inventory` (XP, gold, level, HP, gear, inventory, knockout-until, flags) is written in the same Room input that caused it, before events are broadcast. This includes streamer commands such as `giveGold` and `healParty`.
 
-**The room snapshot holds only live, non-progress state**: adventure and encounter state, held flag (and remaining time when held), party membership and join times, a copy of the spawned monster's stats (so later edits or deletion of its template don't affect the fight), monster HP and next attack time, cooldowns, drowsy and guard effects, who has acted this encounter, and for each member whether they have been active at any point since joining the encounter (for the §4.7 exemption). It is written:
+**The room snapshot holds only live, non-progress state**: adventure and encounter state, held flag (and remaining time when held), party membership and join times, a copy of the spawned monster's template, including name and image (so later edits or deletion of the template don't affect the fight or its display), monster HP and next attack time, cooldowns, drowsy and guard effects, who has acted this encounter, and for each member whether they have been active at any point since joining the encounter (for the §4.7 exemption). It is written:
 
 - immediately after adventure start/end, encounter start/end, join/leave, any streamer command, a member's first action in an encounter, and a member's first moment of being active in an encounter (so the records used at encounter end are never lost);
 - otherwise at most every 10 s while something changed.
@@ -348,20 +350,23 @@ A web page added as an OBS custom browser dock. Tabs:
 
 - Twitch limits: 5 KB per message; about 1 message per second per channel.
 - The server sends a compact snapshot to the channel's broadcast topic at most once per second, only when state changed.
-- Contents: adventure/encounter state (incl. fighting/waiting and held), monster (ID, HP, max HP, next attack time, last strike time), party entries as `[playerKey, classId, hpPercent, statusFlags]`, and a `rosterVersion` number.
+- Contents: adventure/encounter state (incl. fighting/waiting and held), monster (name, image URL and stats from the spawned copy, HP, max HP, next attack time, last strike time), party entries as `[playerKey, classId, hpPercent, statusFlags]`, and a `rosterVersion` number.
 - Names and gear are not in the snapshot. When `rosterVersion` changes, the extension fetches the roster (player keys → names, classes, levels) over HTTP.
-- **Trimming**: if a snapshot would exceed 5 KB (only possible with a very large `partyCap`), it lists only the first party members by join order plus a `partyTotal` count. The snapshot is used only for showing the party and monster; no viewer relies on it for their own state (§7.3).
+- **Trimming**: if a snapshot would exceed 5 KB (only with a very large party), it lists only the first party members by join order plus a `partyTotal` count. The snapshot is used only for showing the party and monster; no viewer relies on it for their own state (§7.3).
 
 ### 7.3 A viewer's own state
 
-Each party member's extension fetches its own state (HP, status, cooldown end times, gear) over HTTP:
+Every viewer who has shared identity fetches their own state (HP, status, cooldown end times, gear, inventory) over HTTP:
 
-- on load and after joining;
-- in the response to each of its own actions;
+- on load, after joining, and after each gear change (party members and non-members alike);
+- in the response to each of their own actions.
+
+Party members also fetch it:
+
 - when the snapshot's monster `last strike time` changes (with a random 0–1 s delay to spread requests);
-- every 5 s during combat.
+- every 5 s while the encounter is fighting and the monster isn't held.
 
-Viewers who aren't in the party don't poll. Cooldown countdowns are computed in the browser from end times sent by the server.
+Only party members poll; nobody polls while waiting, held, resting or with no adventure. Cooldown countdowns are computed in the browser from end times sent by the server.
 
 ## 8. Auth and identity
 
