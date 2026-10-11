@@ -139,7 +139,7 @@ export interface PackApi {
   passive(id: string, def: PassiveDef): void;
   targeting(id: string, def: TargetingDef): void;
   behavior(id: string, def: BehaviorDef): void;
-  encounterKind(id: string, def: EncounterKindDef): void;
+  encounterKind<S = any>(id: string, def: EncounterKindDef<S>): void;
 }
 
 // ---- The plugin context (spec §5.2). Implemented in Plan B. ----
