@@ -1,7 +1,7 @@
 # twitch-dndm — Milestone 1: Core Game Design
 
 **Date:** 2026-10-08
-**Status:** Draft for review (revision 6)
+**Status:** Ready for owner review (revision 7)
 
 ## 1. Purpose
 
@@ -157,7 +157,7 @@ Everything built from the vocabulary (classes, actions, items, numbers) is rules
 - A combat encounter is in one of two sub-states:
   - **fighting**: at least one party member is active.
   - **waiting**: no party member is active (the party is empty, or every member is knocked out — a **wipe**). The monster has no one to attack.
-  - It moves from waiting to fighting the moment any member becomes active (a knockout ends, the streamer revives someone, or a player joins). If the monster isn't held: with `rules.fullIntervalAfterWaiting` on (default), the monster's next attack is scheduled a full interval later; otherwise the original schedule continues. If the monster is held, nothing is scheduled; the release rule below decides.
+  - It moves from waiting to fighting the moment any member becomes active (a knockout ends, the streamer revives someone, or a player who isn't knocked out joins). If the monster isn't held: with `rules.fullIntervalAfterWaiting` on (default), the monster's next attack is scheduled a full interval later; otherwise the original schedule continues. If the monster is held, nothing is scheduled; the release rule below decides.
 - Separately, the streamer can **hold** the monster (`holdMonster`, §5.1). While held, the monster's attack timer doesn't run, in either sub-state, until `releaseMonster`; the only attack possible is a streamer's `monsterStrikeNow`, which strikes once without releasing the hold or changing the timer. On release, if the encounter is fighting: with `rules.fullIntervalAfterRelease` on (default), the next attack is scheduled a full interval later; with it off, the remaining time from when it was held continues if an attack timer was running at that moment, and otherwise the next attack is a full interval later. If the encounter is waiting at release, nothing is scheduled until it becomes fighting (then the waiting rule above applies).
 - **The monster attacks on its timer only while the encounter is fighting and the monster is not held.**
 - Everything that applies "during combat" applies in both sub-states and while held.
@@ -171,7 +171,7 @@ Everything built from the vocabulary (classes, actions, items, numbers) is rules
 | Situation | While resting | During combat |
 |---|---|---|
 | New player, or removed for being idle | yes | yes, if `rules.allowJoinMidFight` (default on) |
-| Removed by the streamer (`removePlayer`) | yes | only if `rules.streamerRemovalWaitsForRest` is off (default on: must wait until no combat encounter is running) |
+| Removed by the streamer (`removePlayer`) | yes | only if `rules.allowJoinMidFight` is on **and** `rules.streamerRemovalWaitsForRest` is off (default: must wait until no combat encounter is running) |
 | Banned (`banPlayer`) | no | no |
 
 - **Weapon on joining**: a player who has never equipped a weapon picks one when they join, at any time. A player who already has an equipped weapon joins with it; they can change it only when gear changes are allowed (§4.4).
@@ -191,7 +191,7 @@ Everything built from the vocabulary (classes, actions, items, numbers) is rules
 (So Fighter 100 HP / 10 dmg, Tank 160 / 5, Healer 90 / 4 with heal power 30.)
 
 - levelGrowth: +5 max HP and +1 damage per level.
-- Each hit deals `damage × random(rules.damageVarianceMin, rules.damageVarianceMax)` (default 1.0–1.2), rounded; on a crit, also × crit multiplier.
+- Each player hit deals `damage × random(rules.damageVarianceMin, rules.damageVarianceMax)` (default 1.0–1.2), rounded; on a crit, also × crit multiplier.
 
 ### 4.4 Gear
 
@@ -224,11 +224,11 @@ A monster template has: name, optional image, max HP, damage per hit, attack int
 
 1. Number of targets: the template's value, or automatic = `ceil(activeMembers / rules.membersPerTarget)` (default 5), minimum 1.
 2. Choose targets: if `rules.guardTakesPriority` is on (default), guarding members first (random order among them); then random other active members, until the count is reached or no one is left.
-3. Each target takes the monster's damage, reduced by their damage reduction and any guard. Then, independently: roll drowsy chance → drowsy; roll knockout chance → knocked out.
+3. Each target takes the monster's damage (flat: no variance or crits), reduced by their damage reduction and any guard. Then, independently: roll drowsy chance → drowsy; roll knockout chance → knocked out.
 4. A player whose HP reaches 0 is knocked out.
 5. The overlay and extension show a countdown to the next attack.
 
-**Knocked out**: lasts `rules.knockoutDuration` (default 60 s) or until revived. When it ends without a revive, the player returns with `rules.knockoutReturnHpPercent` (default 25%) of max HP. A knocked-out player is still in the party. Knockout timers keep running while resting.
+**Knocked out**: lasts `rules.knockoutDuration` (default 60 s) or until revived. When it ends without a revive, the player returns with `rules.knockoutReturnHpPercent` (default 25%) of max HP. A knocked-out player is still in the party. A knockout lasts until its stored end time (`knockout-until`) whatever the player is doing — in or out of the party, with or without an adventure. For players in a loaded Room, the Room's timer ends it, writes the return HP and announces it (§7.2). For anyone else, an expired knockout is applied (return HP written) the next time the player is loaded or their state is fetched.
 
 ### 4.7 Encounter end and removal
 
@@ -306,6 +306,7 @@ Signing up and connecting chat bans are not commands: both need the streamer to 
 
 - Every ruleset change is validated (§4.1). Invalid changes are rejected with the list of errors.
 - `uploadMonsterImage` is sent to the command API as a multipart request; every other command is JSON.
+- Stored image files are immutable: every upload gets a new URL, and a replaced, removed or deleted image's file is kept while any saved snapshot's spawned copy still references it, then cleaned up.
 
 ### 5.3 Control dock
 
@@ -336,7 +337,7 @@ A web page added as an OBS custom browser dock. Tabs:
 - immediately after adventure start/end, encounter start/end, join/leave, any streamer command, a member's first action in an encounter, and a member's first moment of being active in an encounter (so the records used at encounter end are never lost);
 - otherwise at most every 10 s while something changed.
 
-**Restart**: on load, the Room reads its snapshot and the player rows. Timestamps are absolute, so effects, knockouts and cooldowns that expired during the downtime are treated as expired. If the encounter is fighting and the monster isn't held: with `rules.fullIntervalAfterRestart` on (default), the next attack is scheduled a full interval from the moment of load; with it off, the saved next attack time is kept (an attack due during the downtime happens at load). Up to ~10 s of snapshot-only state (monster HP, cooldowns, drowsy/guard) can be lost; player progress and the encounter-end records are never lost.
+**Restart**: on load, the Room reads its snapshot and the player rows. Timestamps are absolute, so effects, knockouts and cooldowns that expired during the downtime are treated as expired. Expired knockouts are applied first, which may turn a waiting encounter into fighting. Then, if the encounter is fighting and the monster isn't held, `rules.fullIntervalAfterRestart` alone decides the next attack (the waiting rule in §4.2 doesn't apply at load): on (default), a full interval from the moment of load; off, the saved next attack time if there is one (an attack due during the downtime happens at load), otherwise a full interval from load. Up to ~10 s of snapshot-only state (monster HP, cooldowns, drowsy/guard) can be lost; player progress and the encounter-end records are never lost.
 
 ## 7. Real-time updates
 
