@@ -122,3 +122,43 @@ export function advanceTo(rt: Runtime, target: number): void {
 export function nextWake(rt: Runtime): number | null {
   return dueItems(rt)[0]?.at ?? null;
 }
+
+/**
+ * After loading a save. Timers are absolute and kept running during the downtime, but nothing acts:
+ * expired knockouts, statuses and cooldowns end; due encounter wakes run once; monster turns and
+ * ticks are not replayed. Then fullIntervalAfterRestart alone decides the next monster turn.
+ */
+export function resumeAt(rt: Runtime, now: number): void {
+  const f0 = currentFight(rt);
+  const savedTurn = f0 ? f0.nextTurnAt ?? f0.pausedTurnAt : null;
+  rt.now = Math.max(rt.now, now);
+
+  for (const ch of Object.values(rt.game.characters).sort((a, b) => (a.knockedOutUntil ?? 0) - (b.knockedOutUntil ?? 0))) {
+    if (ch.knockedOutUntil !== null && ch.knockedOutUntil <= rt.now) {
+      const id = ch.id;
+      runGuarded(rt, () => { endKnockout(rt, id); settle(rt); }, () => { rt.game.characters[id]!.knockedOutUntil = null; });
+    }
+  }
+  for (const item of dueItems(rt)) {
+    if (item.order === 1 && item.at <= rt.now) runGuarded(rt, () => { item.run(rt); settle(rt); }, () => item.skip(rt));
+  }
+  for (let guard = 0; guard < 10_000; guard++) {
+    const overdue = dueItems(rt).find((d) => d.order === 2 && d.at <= rt.now);
+    if (!overdue) break;
+    overdue.skip(rt);
+  }
+  const wake = dueItems(rt).find((d) => d.order === 4);
+  if (wake && wake.at <= rt.now) runGuarded(rt, () => { wake.run(rt); settle(rt); }, () => wake.skip(rt));
+
+  const f = currentFight(rt);
+  if (f && f.sub === 'fighting' && !f.held) {
+    if (rt.settings.fullIntervalAfterRestart || savedTurn === null) {
+      f.nextTurnAt = rt.now + fightInterval(rt, f);
+    } else if (savedTurn <= rt.now) {
+      runGuarded(rt, () => { monsterTurn(rt, f); settle(rt); }, () => { f.nextTurnAt = rt.now + fightInterval(rt, f); });
+    } else {
+      f.nextTurnAt = savedTurn;
+    }
+  }
+  settle(rt);
+}

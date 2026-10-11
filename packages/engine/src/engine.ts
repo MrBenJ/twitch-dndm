@@ -6,8 +6,9 @@ import type { PackBundle } from './pack';
 import { buildRegistry, type Registry } from './registry';
 import { Runtime } from './runtime';
 import { settle } from './settle';
-import { type GameState, newGameState } from './state';
-import { advanceTo, nextWake } from './time';
+import { type GameState, isFight, newGameState } from './state';
+import { advanceTo, nextWake, resumeAt } from './time';
+import { view, type View } from './view';
 
 export type ApplyResult =
   | { ok: true; game: GameState; events: GameEvent[] }
@@ -21,6 +22,9 @@ export interface Engine {
   apply(game: GameState, cmd: Command, now: number): ApplyResult;
   advance(game: GameState, now: number): { game: GameState; events: GameEvent[] };
   nextWakeTime(game: GameState): number | null;
+  resume(game: GameState, now: number): { game: GameState; events: GameEvent[] };
+  adopt(game: GameState): GameState;
+  view(game: GameState, characterId: string | null, now: number): View;
 }
 
 export function toError(e: unknown): { code: string; message: string } | null {
@@ -61,5 +65,32 @@ export function createEngine(opts: { packs: PackBundle[]; channel: unknown }): E
       return { game: rt.game, events: rt.events };
     },
     nextWakeTime: (game) => nextWake(new Runtime(registry, structuredClone(game))),
+    resume(game, now) {
+      const rt = new Runtime(registry, structuredClone(game));
+      resumeAt(rt, now);
+      rt.game.clock = rt.now;
+      return { game: rt.game, events: rt.events };
+    },
+    adopt(game) {
+      const enc = game.session?.encounter;
+      const missing = (what: string) => new EngineError('content-in-use', `The running ${what} uses content that is no longer available`);
+      if (enc) {
+        if (isFight(enc)) {
+          const m = enc.monsters[0]!;
+          const ok = registry.behaviors.has(m.def.behavior.behavior) && m.def.abilities.every((a) => registry.abilities.has(a));
+          if (!ok) throw missing('fight');
+        } else if (!registry.kinds.has(enc.kind)) {
+          throw missing('encounter');
+        }
+      }
+      const adv = game.session?.adventure;
+      if (adv && !registry.adventures.has(adv.id)) throw missing('adventure');
+      return game;
+    },
+    view(game, characterId, now) {
+      const rt = new Runtime(registry, structuredClone(game));
+      rt.now = Math.max(now, game.clock);
+      return view(rt, characterId);
+    },
   };
 }

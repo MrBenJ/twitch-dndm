@@ -12,3 +12,4 @@ export type { Command } from './commands';
 export type { ApplyResult } from './engine';
 export type { GameEvent } from './events';
 export type { GameState, Character, FightState, KindEncounterState, MonsterState, SessionState, StatusInstance } from './state';
+export type { View, AbilityOption } from './view';
