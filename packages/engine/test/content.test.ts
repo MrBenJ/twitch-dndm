@@ -8,7 +8,8 @@ describe('detectDocType', () => {
   });
   it('rejects no type, two types, bad IDs and non-objects', () => {
     expect(detectDocType({ name: 'x' })).toEqual({ error: expect.stringMatching(/no type key/) });
-    expect(detectDocType({ class: 'a', item: 'b' })).toEqual({ error: expect.stringMatching(/more than one type key \(class, item\)/) });
+    expect(detectDocType({ name: 'x', class: 'a' })).toEqual({ error: expect.stringMatching(/Start the document with its type key \(found 'class' later\)/) });
+    expect(detectDocType({ item: 'club', name: 'Club', slot: 'hand' })).toEqual({ type: 'item', id: 'club' });
     expect(detectDocType({ class: 'Bad Id' })).toEqual({ error: expect.stringMatching(/Invalid ID 'Bad Id'/) });
     expect(detectDocType({ class: 'tp:brute' })).toEqual({ error: expect.stringMatching(/without a pack prefix/) });
     expect(detectDocType('x')).toEqual({ error: expect.stringMatching(/must be a map/) });

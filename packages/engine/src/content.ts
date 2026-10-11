@@ -48,10 +48,14 @@ export const DOC_SCHEMAS: Record<ContentType, z.ZodType> = {
 
 export function detectDocType(doc: unknown): { type: ContentType; id: string } | { error: string } {
   if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) return { error: 'A content document must be a map' };
-  const keys = CONTENT_TYPES.filter((t) => t in doc);
-  if (keys.length === 0) return { error: `Document has no type key (one of: ${CONTENT_TYPES.join(', ')})` };
-  if (keys.length > 1) return { error: `Document has more than one type key (${keys.join(', ')})` };
-  const type = keys[0]!;
+  // The type is the document's first key (spec §8): other fields, such as an item's `slot`, may share a type's name.
+  const first = Object.keys(doc)[0];
+  if (first === undefined || !(CONTENT_TYPES as readonly string[]).includes(first)) {
+    const later = Object.keys(doc).find((k) => (CONTENT_TYPES as readonly string[]).includes(k));
+    if (later) return { error: `Start the document with its type key (found '${later}' later)` };
+    return { error: `Document has no type key (one of: ${CONTENT_TYPES.join(', ')})` };
+  }
+  const type = first as ContentType;
   const raw = (doc as Record<string, unknown>)[type];
   if (typeof raw !== 'string') return { error: `The '${type}' key must be an ID` };
   if (raw.includes(':')) return { error: `Write the ${type} ID '${raw}' without a pack prefix` };
