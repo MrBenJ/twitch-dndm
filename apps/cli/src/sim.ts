@@ -73,12 +73,26 @@ export function simulate(o: SimOptions): SimReport {
     };
     const reaction = () => o.reaction[0] + Math.floor(rand() * (o.reaction[1] - o.reaction[0] + 1));
 
-    apply({ type: 'openSession' });
+    // Setup must succeed; a rejected setup command would silently skew the report.
+    const must = (cmd: Command) => {
+      const r = o.engine.apply(game, cmd, now);
+      if (!r.ok) throw new CliError(`Couldn't set up the sim (${cmd.type}): ${r.error.message}`);
+      game = r.game;
+      events.push(...r.events);
+    };
+    must({ type: 'openSession' });
     const bots = classes.map((cls, i) => {
       const id = `bot${i + 1}`;
       const item = itemFor(cls);
-      if (!item.starting) apply({ type: 'giveItem', target: id, item: item.id });
-      apply({ type: 'join', character: id, name: `${d.classes.find((c) => c.id === cls)!.name} ${i + 1}`, pick: item.id });
+      const name = `${d.classes.find((c) => c.id === cls)!.name} ${i + 1}`;
+      if (item.starting) {
+        must({ type: 'join', character: id, name, pick: item.id });
+      } else {
+        // Join first (the character must exist), then hand over and equip the class item.
+        must({ type: 'join', character: id, name });
+        must({ type: 'giveItem', target: id, item: item.id });
+        must({ type: 'equip', character: id, item: item.id });
+      }
       return id;
     });
     if (!apply({ type: 'spawnMonster', monster })) throw new CliError(`Can't spawn ${monster}`);

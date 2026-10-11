@@ -64,6 +64,15 @@ describe('dndm sim', () => {
     expect(lines[0]).toBe(message);
   });
 
+  it('bots get their class item even when it is not a starting item', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sim-'));
+    const channel = join(dir, 'c.yaml');
+    writeFileSync(channel, 'packs: [starter]\nsettings:\n  class-slot: starter:weapon\n  starting-items: []\n');
+    const r = simulate({ engine: await setup({ channel }), ...base, party: ['fighter'], runs: 2 });
+    expect(r.wins).toBe(2);
+    expect(r.byAbility.find((a) => a.ability === 'starter:power-strike')?.uses ?? 0).toBeGreaterThan(0);
+  });
+
   it('the command prints a report and rejects bad input', async () => {
     const lines: string[] = [];
     expect(await simCommand({ party: 'fighter,tank', vs: 'slime', runs: '3', seed: 1, write: (l) => lines.push(l) })).toBe(0);
