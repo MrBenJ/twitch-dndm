@@ -35,6 +35,10 @@ export async function main(argv: string[], io: { stdout: Writable; stdin: Readab
   const [cmd, ...rest] = positionals;
   const common = { packs: values.packs, channel: values.channel, json: values.json };
   const seed = values.seed !== undefined ? Number(values.seed) : 1;
+  if (!Number.isSafeInteger(seed) || seed < 0) {
+    out(values.json ? JSON.stringify({ kind: 'error', text: '--seed must be a whole number of 0 or more' }) : 'error: --seed must be a whole number of 0 or more');
+    return 2;
+  }
   try {
     switch (cmd) {
       case 'validate': {

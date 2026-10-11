@@ -16,8 +16,17 @@ export function runLines(lines: string[], opts: { engine: Engine; seed: number; 
 }
 
 export async function runFile(file: string, opts: SetupOpts & { seed: number; json?: boolean; write: (line: string) => void }): Promise<number> {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    const why = code === 'ENOENT' ? 'no such file' : code === 'EACCES' ? 'permission denied' : code === 'EISDIR' ? 'it is a folder' : 'unreadable';
+    opts.write(opts.json ? JSON.stringify({ kind: 'error', text: `can't read ${file} (${why})` }) : `error: can't read ${file} (${why})`);
+    return 1;
+  }
   const engine = await setup(opts);
-  const lines = readFileSync(file, 'utf8').split('\n');
+  const lines = text.split('\n');
   try {
     for (const l of runLines(lines, { engine, seed: opts.seed, json: opts.json })) opts.write(l);
     return 0;
