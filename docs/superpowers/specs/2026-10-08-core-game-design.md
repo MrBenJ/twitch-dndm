@@ -197,7 +197,7 @@ Everything built from the vocabulary (classes, actions, items, numbers) is rules
 
 - Two slots: **weapon** (sets class) and **armor**.
 - Default starter items: Sword (Fighter), Shield (Tank), Staff (Healer). Other items come from monster drops or streamer gifts.
-- Gear can be changed while resting or when no adventure is running. During combat it is locked if `rules.gearLockDuringCombat` is on (default).
+- Gear can be changed while resting or when no adventure is running. During combat it is locked if `rules.gearLockDuringCombat` is on (default). Banned players can't change gear.
 - If a gear change lowers max HP, current HP is capped at the new max. Raising max HP doesn't raise current HP.
 
 ### 4.5 Actions and cooldowns
