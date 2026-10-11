@@ -146,8 +146,9 @@ export function parseSettings(raw: Record<string, unknown>): {
         }
         case 'curve': {
           const c = value as { first?: unknown; step?: unknown };
-          if (typeof c !== 'object' || c === null || typeof c.first !== 'number' || typeof c.step !== 'number' || c.first < 1 || c.step < 0) {
-            throw new Error('must be { first: number ≥ 1, step: number ≥ 0 }');
+          const whole = (n: unknown, min: number) => typeof n === 'number' && Number.isSafeInteger(n) && n >= min;
+          if (typeof c !== 'object' || c === null || !whole(c.first, 1) || !whole(c.step, 0)) {
+            throw new Error('must be { first: whole number ≥ 1, step: whole number ≥ 0 }');
           }
           out[field] = { first: c.first, step: c.step }; break;
         }

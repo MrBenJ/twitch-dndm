@@ -52,6 +52,15 @@ describe('parseSettings', () => {
   });
 });
 
+describe('xp-curve', () => {
+  it.each([
+    [{ first: Number.NaN, step: 0 }], [{ first: Number.POSITIVE_INFINITY, step: 0 }],
+    [{ first: 80, step: Number.NaN }], [{ first: 80, step: Number.POSITIVE_INFINITY }], [{ first: 80.5, step: 50 }],
+  ])('rejects %j', (curve) => {
+    expect(parseSettings({ 'xp-curve': curve }).errors).toEqual(['xp-curve: must be { first: whole number ≥ 1, step: whole number ≥ 0 }']);
+  });
+});
+
 describe('deepMerge', () => {
   it('merges objects, replaces lists and values', () => {
     expect(deepMerge({ a: 1, b: { c: 2, d: [1, 2] } }, { b: { c: 3, d: [9] }, e: 4 }))
