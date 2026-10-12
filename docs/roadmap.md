@@ -98,6 +98,8 @@ CLI
 ## Project 2: Server and live play
 
 Carries over most of spec rev 7 (`docs/superpowers/specs/2026-10-08-core-game-design.md` §3, §6, §7, §8, §12).
+Split in two: **2a, server core** (spec `docs/superpowers/specs/2026-10-11-server-core-design.md`): rooms, saving,
+command API, WebSocket, dev login, `dndm connect`. **2b, Twitch layer**: auth, PubSub, sign-up, chat bot, uploads, hosting.
 
 - [ ] Always-on Node server, a Room per channel, RoomManager, timers
 - [ ] Postgres via Drizzle: players, channels, packs enabled, channel pack, overrides
