@@ -1,6 +1,6 @@
 import type { Readable, Writable } from 'node:stream';
 import { parseArgs } from 'node:util';
-import { ValidationError, formatIssue } from '@dndm/engine';
+import { ValidationError, formatIssue, parseDuration } from '@dndm/engine';
 import { LoadError } from '@dndm/pack-loader';
 import { CliError } from './ids';
 import { validate } from './validate';
@@ -15,6 +15,8 @@ Commands:
   server migrate                                                   apply database migrations
   server create-channel <name> [--config file] [--seed n]          create a channel; prints its tokens
   server start [--port 8787] [--host 127.0.0.1]                    run the server (DATABASE_URL, DNDM_SECRET, DNDM_DEV=1)
+  connect <url> --channel <id> (--dock <token> | --viewer <name>) [--script file.jsonl] [--timeout 30s]
+                                                                   play against a running server
 
 Every command takes --json (one JSON object per line).`;
 
@@ -32,6 +34,7 @@ export async function main(
         json: { type: 'boolean' }, save: { type: 'string' }, party: { type: 'string' }, vs: { type: 'string' },
         runs: { type: 'string' }, reaction: { type: 'string' }, 'max-time': { type: 'string' }, help: { type: 'boolean', short: 'h' },
         config: { type: 'string' }, port: { type: 'string' }, host: { type: 'string' },
+        dock: { type: 'string' }, viewer: { type: 'string' }, script: { type: 'string' }, timeout: { type: 'string' },
       },
     });
   } catch (e) {
@@ -68,6 +71,18 @@ export async function main(
       case 'sim': {
         const { simCommand } = await import('./sim');
         return await simCommand({ ...common, seed, party: values.party, vs: values.vs, runs: values.runs, reaction: values.reaction, maxTime: values['max-time'], write: out });
+      }
+      case 'connect': {
+        if (!rest[0]) { out('Usage: dndm connect <url> --channel <id> (--dock <token> | --viewer <name>) [--script file]'); return 2; }
+        const { connect } = await import('./connect');
+        let timeoutMs: number | undefined;
+        if (values.timeout !== undefined) {
+          try { timeoutMs = parseDuration(values.timeout); } catch (e) { throw new CliError(`--timeout: ${(e as Error).message}`); }
+        }
+        return await connect({
+          url: rest[0], channel: values.channel, dock: values.dock, viewer: values.viewer, script: values.script,
+          json: values.json, timeoutMs, input: io.stdin, output: io.stdout,
+        });
       }
       case 'server': {
         const { serverCli } = await import('./server');
