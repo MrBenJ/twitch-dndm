@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2a: Server Core
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 4)
+**Status:** Draft for owner review (revision 5)
 **Roadmap:** `docs/roadmap.md`, Project 2 (split into 2a, this spec, and 2b, the Twitch layer)
 **Builds on:** `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over the parts of `2026-10-08-core-game-design.md` (rev 7) §3, §6, §7, §8 and §12 that don't need Twitch, revised for the modular engine.
 
@@ -126,7 +126,7 @@ Rules:
 
 ### 4.4 Rate limit
 
-5 requests per second per viewer and 20 per second per dock token; more are rejected with `rate-limited`. Commands, view reads and WebSocket connects all count. The limiter measures time with the server's injected clock. This is server protection, not a game rule. The end-to-end test (§9) runs with rate limits turned off, as a test setting.
+5 requests per second per viewer, 5 per overlay token and 20 per dock token; more are rejected with `rate-limited`. Commands, view and `describe` reads, and WebSocket connects all count. The limiter measures time with the server's injected clock. This is server protection, not a game rule. The end-to-end test (§9) runs with rate limits turned off, as a test setting.
 
 ## 5. Live updates (WebSocket)
 
@@ -139,16 +139,16 @@ Rules:
   - events go to their audience (§7.2): public events to everyone; events with an audience only to the dock and to those characters' viewer connections, never to the overlay. The dock sees every event (engine spec §9.6);
   - the dock and overlay get the new public view;
   - each connected viewer gets their new view, only if it changed.
-- **After a config change**, everyone gets a `config-changed` message and fetches `describe` again.
+- **After a config change**, everyone gets a `config-changed` message and fetches `describe` again after a random 0–1 s delay.
 - Clients reconnect on their own with backoff and get a full picture again.
-- The Hub tells the Room which characters are **watched** (`room.watch(id)`, `room.unwatch(id)`). In 2a a viewer is watched while their WebSocket is open. Watched characters stay loaded (§6.2) and get their view after each input.
+- The Hub tells the Room which characters are **watched** (`room.watch(id)`, `room.unwatch(id)`). In 2a a viewer is watched while their WebSocket is open. Watched characters stay loaded (§6.2) and get their new view after an input only if it changed.
 - In 2a, viewer connections stand in for Extension PubSub. 2b replaces that path, and decides what "watched" means, without changing the Room.
 
 ## 6. The Room
 
 ### 6.1 The input loop
 
-Each Room has one queue. Inputs are commands, a timer firing, config changes and character catch-ups (§6.2), handled one at a time:
+Each Room has one queue. Inputs are commands, a timer firing, config changes and loads (a view read or a WebSocket connect that needs a character loaded, §6.2), handled one at a time:
 
 1. Load the characters the input needs (§6.2).
 2. Call the engine with `now` from an injected clock (tests use a fake clock).
@@ -163,7 +163,7 @@ Nothing is broadcast or answered before the save commits.
 - **Loading.** Before calling the engine, the Room loads the sender's character and any character named in the command, if they aren't loaded already. A character that doesn't exist yet is created by the engine as today (on `join`). A view read (§4.2) or a viewer's WebSocket connection (§5) loads that viewer's character the same way.
 - **Loading a Room** (at boot or on demand) is the only definition used anywhere: it loads its `rooms` row, every party member, every character with a `wake_at` (§6.4) and, if a session is open, every character marked "removed by the streamer". Then it runs `engine.resume(game, now)` once, as the engine requires after loading a saved game.
 - **Opening a session** loads every character marked "removed by the streamer" first, so the flag can clear at the session's first rest.
-- **Loading one character into a running Room** never calls `resume`, which would reset the monster's turn (engine §6.10). It calls `engine.catchUp(game, characterId, now)` instead (§7.3), which handles only that character's knockout and statuses that ended or came due while they were unloaded. This is an input like any other (§6.1), so its results are saved and broadcast.
+- **Loading one character into a running Room** never calls `resume`, which would reset the monster's turn (engine §6.10). It calls `engine.catchUp(game, characterId, now)` instead (§7.3), which handles only that character's knockout and statuses that ended or came due while they were unloaded. The catch-up is part of the input that needed the character: it runs in that input's engine pass, and is saved with it or thrown away with it. If a command is rejected, its catch-up isn't saved; it is simply done again the next time the character loads, with the same result, because timers are absolute times. A view read or a connect that needs a character loaded is a load input of its own.
 - **Staying loaded.** A character stays loaded while any of these is true:
   - they're in the party;
   - they have a running timer: a knockout, or a status with an end time or a next tick (cooldowns don't count: nothing happens when one ends);
