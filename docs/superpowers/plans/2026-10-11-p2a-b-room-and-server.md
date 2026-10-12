@@ -2053,13 +2053,15 @@ async function direct(lines: Line[]): Promise<Out[]> {
   return out;
 }
 
-/** A streamer command that names a viewer's character names their server ID, `dev:<name>`. */
+/** A command that names a viewer's character (or targets one) names their server ID, `dev:<name>`. */
 function toDev(c: Record<string, unknown>): Record<string, unknown> {
   const out = { ...c };
   if (typeof out.character === 'string') out.character = `dev:${out.character}`;
   if (typeof out.target === 'string' && out.target !== 'party') out.target = `dev:${out.target}`;
   const t = out.target as { kind?: string; id?: string } | undefined;
   if (t && typeof t === 'object' && t.kind === 'character') out.target = { ...t, id: `dev:${t.id}` };
+  const chosen = out.chosen as { kind?: string; id?: string } | null | undefined;
+  if (chosen && chosen.kind === 'character') out.chosen = { ...chosen, id: `dev:${chosen.id}` };
   return out;
 }
 
@@ -2098,7 +2100,7 @@ async function viaServer(lines: Line[]): Promise<Out[]> {
     const { character: _drop, ...command } = l.command;
     const r = await srv.app.inject({
       method: 'POST', url: `/channels/${c.id}/commands`,
-      payload: { id: `g${++n}`, command: l.as === 'streamer' ? toDev(l.command) : command },
+      payload: { id: `g${++n}`, command: toDev(l.as === 'streamer' ? l.command : command) },
       headers: { authorization: `Bearer ${tokens.get(l.as)}` },
     });
     const body = r.json();
