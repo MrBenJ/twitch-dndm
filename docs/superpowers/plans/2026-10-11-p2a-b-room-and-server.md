@@ -830,7 +830,8 @@ describe('memory rules (spec 2a §6.2, §6.6)', () => {
     await s.room.sweep();
     expect(s.room.game.characters['dev:al']!.removedByStreamer).toBe(true);
     await s.cmd(s.dock, { type: 'endEncounter' });
-    expect(s.room.game.characters['dev:al']!.removedByStreamer).toBe(false);
+    // Cleared at the rest; with nothing keeping them loaded any more, only the saved copy remains.
+    expect((await s.store.characters(s.made.id, ['dev:al']))[0]!.removedByStreamer).toBe(false);
   });
 
   it('opening a session loads removed characters so the flag can clear', async () => {

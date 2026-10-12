@@ -157,14 +157,93 @@ export class Room {
     return () => { this.listeners.delete(fn); };
   }
 
-  // ---- filled in by Task 3 ----
-  async watch(_characterId: string): Promise<View> { throw new Error('Task 3'); }
-  unwatch(_characterId: string): void {}
-  async sweep(): Promise<void> {}
-  canUnload(_now: number): boolean { return false; }
-  private arm(): void {}
-  private afterInput(events: GameEvent[], _now: number): void {
+  // ---- watching, views, timers and memory (spec 2a §5, §6.2, §6.6) ----
+
+  /** A watched character stays loaded and gets their view after each input when it changed. */
+  async watch(characterId: string): Promise<View> {
+    return this.run(async () => {
+      const now = this.deps.clock.now();
+      this.watchers.set(characterId, (this.watchers.get(characterId) ?? 0) + 1);
+      await this.ensureLoaded([characterId]);
+      this.touched.set(characterId, now);
+      const v = this.engine.view(this.game, characterId, now);
+      this.lastViews.set(characterId, JSON.stringify(v));
+      return v;
+    });
+  }
+
+  unwatch(characterId: string): void {
+    const n = (this.watchers.get(characterId) ?? 0) - 1;
+    if (n > 0) { this.watchers.set(characterId, n); return; }
+    this.watchers.delete(characterId);
+    this.lastViews.delete(characterId);
+  }
+
+  async sweep(): Promise<void> {
+    await this.run(async () => { this.drop(this.deps.clock.now()); });
+  }
+
+  canUnload(now: number): boolean {
+    if (this.closed || this.game.session || this.watchers.size || this.listeners.size) return false;
+    if (now - this.lastActivity < IDLE_ROOM) return false;
+    return Object.keys(this.game.characters).every((id) => this.engine.characterWake(this.game, id) === null);
+  }
+
+  /** Spec 2a §6.2 "Staying loaded". Only characters whose saved copy is current are dropped. */
+  private drop(now: number): void {
+    const s = this.game.session;
+    const waits = this.engine.registry.settings.streamerRemovalWaitsForRest;
+    for (const [id, ch] of Object.entries(this.game.characters)) {
+      if (s?.party.includes(id)) continue;
+      if (this.engine.characterWake(this.game, id) !== null) continue;
+      if (s && waits && ch.removedByStreamer) continue;
+      if (this.watchers.has(id)) continue;
+      if (now - (this.touched.get(id) ?? 0) < IDLE_CHARACTER) continue;
+      if (this.saved.get(id) !== JSON.stringify(ch)) continue;
+      delete this.game.characters[id];
+      this.saved.delete(id);
+      this.touched.delete(id);
+    }
+  }
+
+  private afterInput(events: GameEvent[], now: number): void {
+    this.drop(now);
     if (events.length) this.emit({ type: 'events', events });
+    this.publishViews(now);
+    this.arm();
+  }
+
+  private publishViews(now: number): void {
+    const viewers = new Map<string, View>();
+    for (const id of this.watchers.keys()) {
+      const v = this.engine.view(this.game, id, now);
+      const json = JSON.stringify(v);
+      if (this.lastViews.get(id) !== json) { this.lastViews.set(id, json); viewers.set(id, v); }
+    }
+    this.emit({ type: 'views', publicView: this.engine.view(this.game, null, now), viewers });
+  }
+
+  /** One timer for the engine's next wake-up, or a retry after a failed save (spec 2a §6.3). */
+  private arm(retryIn?: number): void {
+    this.cancelTimer?.();
+    this.cancelTimer = null;
+    if (this.closed) return;
+    const at = retryIn !== undefined ? this.deps.clock.now() + retryIn : this.engine.nextWakeTime(this.game);
+    if (at === null) return;
+    this.cancelTimer = this.deps.clock.setTimer(at, () => { void this.run(() => this.tick()); });
+  }
+
+  private async tick(): Promise<void> {
+    if (this.closed) return;
+    const now = this.deps.clock.now();
+    const r = this.engine.advance(this.game, now);
+    if (!(await this.save(r.game, this.pruned(now)))) {
+      this.failures += 1;
+      this.arm(Math.min(1000 * 2 ** (this.failures - 1), 30_000));
+      return;
+    }
+    this.failures = 0;
+    this.afterInput(r.events, now);
   }
 
   // ---- filled in by Task 4 ----
