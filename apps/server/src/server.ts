@@ -1,9 +1,15 @@
 import { join } from 'node:path';
 import { createEngine, type PackBundle } from '@dndm/engine';
 import { listPackDirs, loadChannel, loadPacks, repoRoot } from '@dndm/pack-loader';
-import { hashToken, newToken, type Secrets } from './crypto';
+import { hashToken, newToken, Secrets } from './crypto';
 import { STATE_VERSION } from './room';
-import type { Store } from './store';
+import type { FastifyInstance } from 'fastify';
+import { buildApp } from './app';
+import { RateLimiter } from './auth';
+import { type Clock, realClock } from './clock';
+import { Hub } from './hub';
+import { RoomManager } from './room-manager';
+import { Store } from './store';
 
 /** Every official pack, code included: any channel may enable any of them (spec 2a §2.2). */
 export function officialBundles(): Promise<PackBundle[]> {
@@ -30,4 +36,45 @@ export async function createChannel(o: {
     overlay: { hash: hashToken(overlayToken), enc: o.secrets.encrypt(overlayToken) },
   });
   return { id, dockToken, overlayToken };
+}
+
+export interface ServerOpts {
+  databaseUrl: string; secret: string; dev?: boolean; port?: number; host?: string;
+  clock?: Clock; rateLimits?: boolean; bundles?: PackBundle[];
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
+}
+export interface RunningServer {
+  app: FastifyInstance; manager: RoomManager; hub: Hub; store: Store; secrets: Secrets; url: string;
+  close(): Promise<void>;
+}
+
+/** Spec 2a §6.4 and §6.6: take the lock, load Rooms that need running, then listen. */
+export async function startServer(opts: ServerOpts): Promise<RunningServer> {
+  const store = Store.open(opts.databaseUrl);
+  if (!(await store.tryLock())) {
+    await store.close();
+    throw new Error('Another dndm server is already running against this database');
+  }
+  try {
+    const clock = opts.clock ?? realClock;
+    const secrets = new Secrets(opts.secret);
+    const bundles = opts.bundles ?? (await officialBundles());
+    const manager = new RoomManager({ store, clock, secrets, bundles, log: opts.log });
+    await manager.boot();
+    manager.startSweeper();
+    const hub = new Hub();
+    const app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev });
+    const url = opts.port !== undefined ? await app.listen({ port: opts.port, host: opts.host ?? '127.0.0.1' }) : '';
+    return {
+      app, manager, hub, store, secrets, url,
+      async close() {
+        await app.close();
+        manager.close();
+        await store.close();
+      },
+    };
+  } catch (e) {
+    await store.close();
+    throw e;
+  }
 }
