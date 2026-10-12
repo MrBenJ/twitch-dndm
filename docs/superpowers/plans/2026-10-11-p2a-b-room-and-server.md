@@ -1537,6 +1537,7 @@ async function setup(opts: { dev?: boolean; limits?: boolean; helloTimeoutMs?: n
     manager, hub: new Hub(), secrets: s.secrets, limiter: new RateLimiter(s.clock, opts.limits ?? false),
     dev: opts.dev ?? true, helloTimeoutMs: opts.helloTimeoutMs,
   });
+  await app.ready();
 }
 
 const post = (token: string | null, id: string, command: Record<string, unknown>, channel = s.made.id) =>

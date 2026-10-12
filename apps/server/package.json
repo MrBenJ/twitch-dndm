@@ -3,16 +3,21 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "dependencies": {
     "@dndm/engine": "workspace:*",
     "@dndm/pack-loader": "workspace:*",
     "@dndm/protocol": "workspace:*",
+    "@fastify/websocket": "11.3.1",
     "drizzle-orm": "0.45.3",
+    "fastify": "5.12.5",
     "postgres": "3.4.9",
     "zod": "4.6.6"
   },
   "devDependencies": {
-    "drizzle-kit": "0.31.11"
+    "drizzle-kit": "0.31.11",
+    "@types/ws": "8.18.1"
   }
 }
