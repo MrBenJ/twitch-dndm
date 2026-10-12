@@ -25,12 +25,21 @@ export const LIMITS: Record<Role, number> = { viewer: 5, overlay: 5, dock: 20 };
 /** Requests per second per sender (spec 2a §4.4). Measured on the server's clock. */
 export class RateLimiter {
   private hits = new Map<string, number[]>();
+  private nextPruneAt = 0;
 
   constructor(private readonly clock: Clock, private readonly enabled = true, private readonly limits: Record<Role, number> = LIMITS) {}
 
   take(role: Role, key: string): boolean {
     if (!this.enabled) return true;
     const now = this.clock.now();
+    if (now >= this.nextPruneAt) {
+      for (const [sender, times] of this.hits) {
+        const active = times.filter((t) => now - t < 1000);
+        if (active.length) this.hits.set(sender, active);
+        else this.hits.delete(sender);
+      }
+      this.nextPruneAt = now + 1000;
+    }
     const recent = (this.hits.get(key) ?? []).filter((t) => now - t < 1000);
     const ok = recent.length < this.limits[role];
     if (ok) recent.push(now);

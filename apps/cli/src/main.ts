@@ -27,8 +27,15 @@ export async function main(
   const out = (line: string) => io.stdout.write(`${line}\n`);
   let parsed;
   try {
+    // A generated base64url dock token may start with '-', which parseArgs treats as an option.
+    const args = [...argv];
+    for (let i = 0; i < args.length - 1; i++) {
+      if (args[i] === '--dock' && /^-[A-Za-z0-9_-]{42}$/.test(args[i + 1]!)) {
+        args.splice(i, 2, `--dock=${args[i + 1]}`);
+      }
+    }
     parsed = parseArgs({
-      args: argv, allowPositionals: true,
+      args, allowPositionals: true,
       options: {
         packs: { type: 'string', multiple: true }, channel: { type: 'string' }, seed: { type: 'string' },
         json: { type: 'boolean' }, save: { type: 'string' }, party: { type: 'string' }, vs: { type: 'string' },
