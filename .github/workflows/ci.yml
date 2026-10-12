@@ -5,6 +5,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: dndm
+          POSTGRES_PASSWORD: dndm
+          POSTGRES_DB: dndm
+        ports:
+          - 5455:5432
+        options: >-
+          --health-cmd "pg_isready -U dndm"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://dndm:dndm@localhost:5455/dndm
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

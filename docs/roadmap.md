@@ -101,15 +101,24 @@ Carries over most of spec rev 7 (`docs/superpowers/specs/2026-10-08-core-game-de
 Split in two: **2a, server core** (spec `docs/superpowers/specs/2026-10-11-server-core-design.md`): rooms, saving,
 command API, WebSocket, dev login, `dndm connect`. **2b, Twitch layer**: auth, PubSub, sign-up, chat bot, uploads, hosting.
 
-- [ ] Always-on Node server, a Room per channel, RoomManager, timers
-- [ ] Postgres via Drizzle: players, channels, packs enabled, channel pack, overrides
-- [ ] Command API (game and admin), shared by dock, chat and later Stream Deck
-- [ ] Real time: WebSocket to dock and overlay, Extension PubSub to viewers
-- [ ] Twitch auth: extension JWT, identity share, dock/overlay tokens
+2a delivered (plans `docs/superpowers/plans/2026-10-11-p2a-*.md`):
+
+- [x] Always-on Node server, a Room per channel, RoomManager, timers
+- [x] Postgres via Drizzle: channels (config, tokens), rooms, characters
+- [x] Command API (engine and server commands), shared by every client
+- [x] Real time: WebSocket to dock, overlay and (dev) viewers, filtered by event audience
+- [x] Reliability: save before broadcast, restart recovery, advisory lock
+- [x] `dndm server` and `dndm connect`
+
+2b, still to do:
+
+- [ ] Extension PubSub to viewers (replaces 2a's dev viewer WebSockets)
+- [ ] Twitch auth: extension JWT, identity share, streamer sign-up
 - [ ] Optional, quiet chat bot per channel (join via chat), opt-in chat bans.
-      Rev 7's "no chat bot" was for its milestone; settle this in the Project 2 spec
+      Rev 7's "no chat bot" was for its milestone; settle this in the 2b spec
 - [ ] Media uploads (monster images, story beat images and video)
-- [ ] Reliability: restart recovery, snapshots
+- [ ] Hosting and deploy
+- [ ] Redefine "official pack" for paid packs
 
 ## Project 3: Screens
 
