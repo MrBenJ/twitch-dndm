@@ -203,6 +203,15 @@ importers:
         specifier: 2.9.1
         version: 2.9.1
 
+  packages/protocol:
+    dependencies:
+      '@dndm/engine':
+        specifier: workspace:*
+        version: link:../engine
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+
   packs/starter:
     dependencies:
       '@dndm/engine':
