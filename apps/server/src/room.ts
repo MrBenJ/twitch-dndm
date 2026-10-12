@@ -246,10 +246,98 @@ export class Room {
     this.afterInput(r.events, now);
   }
 
-  // ---- filled in by Task 4 ----
-  private readOnly(_c: ServerCommand): Answer { return fail('internal', 'Task 4'); }
-  private async serverCommand(_c: ServerCommand, _key: string, _now: number): Promise<Answer> { return fail('internal', 'Task 4'); }
-  async replayRevoked(_tokenHash: string, _requestId: string): Promise<Answer | null> { return null; }
+  // ---- server commands (spec 2a §4.1, §6.5) ----
+
+  /** getConfig and validateConfig change nothing, so they skip the queue and the request-ID store (§6.1). */
+  private readOnly(c: ServerCommand): Answer {
+    if (c.type === 'getConfig') return { ok: true, events: [], result: { config: this.channel.config, configVersion: this.channel.configVersion } };
+    if (c.type !== 'validateConfig') return fail('bad-command', 'Not a read-only command');
+    const checked = this.check(c.config);
+    return { ok: true, events: [], result: { errors: 'errors' in checked ? checked.errors : [] } };
+  }
+
+  private check(config: Record<string, unknown>): { engine: Engine } | { errors: string[] } {
+    try {
+      return { engine: createEngine({ packs: this.deps.bundles, channel: config }) };
+    } catch (e) {
+      if (e instanceof ValidationError) return { errors: e.issues.map(formatIssue) };
+      throw e;
+    }
+  }
+
+  private async serverCommand(c: ServerCommand, key: string, now: number): Promise<Answer> {
+    if (c.type === 'updateConfig') return this.updateConfig(c.config, c.basedOn, key, now);
+    if (c.type === 'regenerateDockUrl') return this.regenerate('dock', key, now);
+    if (c.type === 'regenerateOverlayUrl') return this.regenerate('overlay', key, now);
+    return fail('bad-command', 'Not a command that changes anything');
+  }
+
+  private async updateConfig(config: Record<string, unknown>, basedOn: number, key: string, now: number): Promise<Answer> {
+    const current = this.channel.configVersion;
+    if (basedOn !== current) return fail('stale-config', `The config changed since you loaded it (it's now version ${current})`);
+    const checked = this.check(config);
+    if ('errors' in checked) return fail('invalid-config', checked.errors.join('\n'));
+    const next = checked.engine;
+    try {
+      next.adopt(this.game);
+    } catch (e) {
+      if (e instanceof EngineError) return fail(e.code, e.message);
+      throw e;
+    }
+    const before = this.engine.registry.settings.streamerRemovalWaitsForRest;
+    if (this.game.session && next.registry.settings.streamerRemovalWaitsForRest && !before) {
+      this.add(await this.deps.store.removedCharacters(this.channel.id));
+    }
+    const version = current + 1;
+    const answer: Answer = { ok: true, events: [], result: { configVersion: version } };
+    const recent = [...this.pruned(now), { key, at: now, answer }];
+    const chars = this.changed(this.game, next, true);
+    try {
+      await this.deps.store.saveConfig(this.channel.id, config, version, this.roomRow(this.game, recent), chars);
+    } catch (e) {
+      this.deps.log?.('save failed', { channel: this.channel.id, error: String(e) });
+      return fail('save-failed', 'The config could not be saved, so nothing changed. Try again.');
+    }
+    this.engine = next;
+    this.channel = { ...this.channel, config, configVersion: version };
+    this.recent = recent;
+    for (const ch of chars) this.saved.set(ch.data.id, JSON.stringify(ch.data));
+    this.emit({ type: 'config-changed', configVersion: version });
+    this.afterInput([], now);
+    return answer;
+  }
+
+  /** The answer is kept with the token encrypted, and can be replayed with the token it replaced (§4.1). */
+  private async regenerate(role: 'dock' | 'overlay', key: string, now: number): Promise<Answer> {
+    const token = newToken();
+    const hash = hashToken(token);
+    const oldHash = role === 'dock' ? this.channel.dockTokenHash : this.channel.overlayTokenHash;
+    const answer: Answer = { ok: true, events: [], result: { token } };
+    const entry: RecentRequest = { key, at: now, answer: { enc: this.deps.secrets.encrypt(JSON.stringify(answer)) }, replacedHash: oldHash };
+    const recent = [...this.pruned(now), entry];
+    const enc = this.deps.secrets.encrypt(token);
+    try {
+      await this.deps.store.saveToken(this.channel.id, role, { hash, enc }, this.roomRow(this.game, recent));
+    } catch (e) {
+      this.deps.log?.('save failed', { channel: this.channel.id, error: String(e) });
+      return fail('save-failed', 'The new token could not be saved, so the old one still works. Try again.');
+    }
+    this.recent = recent;
+    this.channel = role === 'dock'
+      ? { ...this.channel, dockTokenHash: hash, dockTokenEnc: enc }
+      : { ...this.channel, overlayTokenHash: hash, overlayTokenEnc: enc };
+    this.emit({ type: 'token-revoked', role, tokenHash: oldHash });
+    return answer;
+  }
+
+  /** A dock that regenerated its own token retries with the old one (§4.1). */
+  async replayRevoked(tokenHash: string, requestId: string): Promise<Answer | null> {
+    return this.run(async () => {
+      const now = this.deps.clock.now();
+      const r = this.recent.find((x) => x.replacedHash === tokenHash && x.key === `dock:${requestId}` && now - x.at < REQUEST_TTL);
+      return r ? this.open(r) : null;
+    });
+  }
 
   // ---- plumbing ----
 
