@@ -14,6 +14,7 @@ let s: Awaited<ReturnType<typeof roomSetup>>;
 let app: FastifyInstance;
 let manager: RoomManager;
 let hub: Hub;
+let limiter: RateLimiter;
 afterEach(async () => { await app?.close(); manager?.close(); await s?.done(); });
 
 async function setup() {
@@ -21,7 +22,8 @@ async function setup() {
   s.room.close();
   manager = new RoomManager(s.deps);
   hub = new Hub();
-  app = await buildApp({ manager, hub, secrets: s.secrets, limiter: new RateLimiter(s.clock, false), dev: true });
+  limiter = new RateLimiter(s.clock, false);
+  app = await buildApp({ manager, hub, secrets: s.secrets, limiter, dev: true });
   await app.ready();
 }
 
@@ -75,6 +77,28 @@ describe('final review fixes', () => {
       headers: { authorization: `Bearer ${s.made.dockToken}` },
     });
     expect(r.json()).toMatchObject({ ok: true });
+  });
+
+  it('reloads a Room closed after authentication before serving a view', async () => {
+    await setup();
+    const loaded = (await manager.get(s.made.id))!;
+    const take = limiter.take.bind(limiter);
+    limiter.take = (role, key) => {
+      loaded.close();
+      return take(role, key);
+    };
+    const r = await app.inject({
+      method: 'GET', url: `/channels/${s.made.id}/view`,
+      headers: { authorization: `Bearer ${s.made.dockToken}` },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ ok: true, view: { phase: 'closed' } });
+  });
+
+  it('a closed Room refuses read-only commands', async () => {
+    s = await roomSetup();
+    s.room.close();
+    await expect(s.room.command(s.dock, 'config', { type: 'getConfig' })).rejects.toThrow(/closed/);
   });
 
   it('#10 an oversized hello is refused', async () => {

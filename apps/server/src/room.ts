@@ -95,6 +95,7 @@ export class Room {
   // ---- inputs ----
 
   async command(sender: Sender, requestId: string, raw: Raw): Promise<Answer> {
+    if (this.closed) throw new RoomClosedError();
     if (sender.role === 'overlay') return fail('forbidden', 'The overlay can only watch');
     const type = raw.type;
     let server: ServerCommand | null = null;

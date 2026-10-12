@@ -69,7 +69,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     const r = await roomAndSender(req, res);
     if (!r) return res;
     if (!r.who) return reply(res, fail(r.error!.code, r.error!.message));
-    return reply(res, { ok: true, view: await r.room.view(r.who) });
+    try {
+      return reply(res, { ok: true, view: await r.room.view(r.who) });
+    } catch (e) {
+      if (!(e instanceof RoomClosedError)) throw e;
+      const fresh = await deps.manager.get(req.params.channel);
+      if (!fresh) return reply(res, fail('unknown-channel', 'No such channel'));
+      return reply(res, { ok: true, view: await fresh.view(r.who) });
+    }
   });
 
   app.get('/channels/:channel/describe', async (req: ChannelReq, res) => {
