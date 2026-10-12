@@ -7,4 +7,4 @@ services:
       POSTGRES_PASSWORD: dndm
       POSTGRES_DB: dndm
     ports:
-      - "5455:5432"
+      - "127.0.0.1:5455:5432"
