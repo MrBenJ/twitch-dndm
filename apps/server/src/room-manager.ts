@@ -12,7 +12,8 @@ export class RoomManager {
 
   get(channelId: string): Promise<Room | null> {
     const room = this.loaded.get(channelId);
-    if (room) return Promise.resolve(room);
+    if (room && !room.closed) return Promise.resolve(room);
+    if (room) this.loaded.delete(channelId);
     let p = this.loading.get(channelId);
     if (!p) {
       p = Room.load(channelId, this.deps)
@@ -28,7 +29,10 @@ export class RoomManager {
   }
 
   async boot(): Promise<void> {
-    for (const id of await this.deps.store.roomsToBoot()) await this.get(id);
+    for (const id of await this.deps.store.roomsToBoot()) {
+      // One Room that can't load mustn't keep every other channel offline.
+      try { await this.get(id); } catch (e) { this.deps.log?.('room failed to load at boot', { channel: id, error: String(e) }); }
+    }
   }
 
   async sweep(): Promise<void> {

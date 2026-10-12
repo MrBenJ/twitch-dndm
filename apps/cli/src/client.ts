@@ -68,7 +68,12 @@ export class Client {
       let welcomed = false;
       ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'hello', token })));
       ws.addEventListener('error', () => { if (!welcomed) reject(new CliError(`can't reach the server at ${this.base}`)); });
-      ws.addEventListener('close', (ev) => { if (!welcomed) reject(new CliError(`the server refused the live connection (${ev.code} ${ev.reason})`)); });
+      ws.addEventListener('close', (ev) => {
+        if (!welcomed) { reject(new CliError(`the server refused the live connection (${ev.code} ${ev.reason})`)); return; }
+        // After the welcome, a close ends the session (README decision 12): tell the listeners.
+        const m: ServerMessage = { type: 'error', code: 'disconnected', message: `the live connection closed (${ev.code}${ev.reason ? ` ${ev.reason}` : ''})` };
+        for (const fn of listeners) fn(m);
+      });
       ws.addEventListener('message', (ev) => {
         const m = JSON.parse(String(ev.data)) as ServerMessage;
         if (!welcomed && m.type === 'welcome') {

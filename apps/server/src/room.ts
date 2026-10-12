@@ -24,6 +24,14 @@ export const IDLE_CHARACTER = 10 * 60_000;
 export const IDLE_ROOM = 30 * 60_000;
 export const STATE_VERSION = 1;
 
+/** A Room that was unloaded; the caller should get a fresh one from the RoomManager. */
+export class RoomClosedError extends Error {
+  constructor() {
+    super('This room was closed');
+    this.name = 'RoomClosedError';
+  }
+}
+
 type Raw = { type: string } & Record<string, unknown>;
 const fail = (code: string, message: string): Answer => ({ ok: false, error: { code, message } });
 
@@ -52,7 +60,8 @@ export class Room {
   private listeners = new Set<(o: RoomOutput) => void>();
   private cancelTimer: (() => void) | null = null;
   private failures = 0;
-  private closed = false;
+  private pending = 0;
+  closed = false;
 
   private constructor(
     private readonly deps: RoomDeps,
@@ -161,15 +170,20 @@ export class Room {
 
   /** A watched character stays loaded and gets their view after each input when it changed. */
   async watch(characterId: string): Promise<View> {
+    // Counted now, not when the queue gets to it, so an unwatch in between balances it.
+    this.watchers.set(characterId, (this.watchers.get(characterId) ?? 0) + 1);
     return this.run(async () => {
       const now = this.deps.clock.now();
-      this.watchers.set(characterId, (this.watchers.get(characterId) ?? 0) + 1);
       await this.ensureLoaded([characterId]);
       this.touched.set(characterId, now);
       const v = this.engine.view(this.game, characterId, now);
       this.lastViews.set(characterId, JSON.stringify(v));
       return v;
     });
+  }
+
+  watchCount(): number {
+    return this.watchers.size;
   }
 
   unwatch(characterId: string): void {
@@ -184,7 +198,7 @@ export class Room {
   }
 
   canUnload(now: number): boolean {
-    if (this.closed || this.game.session || this.watchers.size || this.listeners.size) return false;
+    if (this.closed || this.pending || this.game.session || this.watchers.size || this.listeners.size) return false;
     if (now - this.lastActivity < IDLE_ROOM) return false;
     return Object.keys(this.game.characters).every((id) => this.engine.characterWake(this.game, id) === null);
   }
@@ -343,7 +357,12 @@ export class Room {
 
   /** Every input runs here, one at a time (spec 2a §6.1). */
   private run<T>(fn: () => Promise<T>): Promise<T> {
-    const p = this.queue.then(fn);
+    if (this.closed) return Promise.reject(new RoomClosedError());
+    this.pending += 1;
+    const p = this.queue.then(() => {
+      if (this.closed) throw new RoomClosedError();
+      return fn();
+    }).finally(() => { this.pending -= 1; });
     this.queue = p.then(() => undefined, () => undefined);
     return p;
   }

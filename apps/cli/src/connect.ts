@@ -37,6 +37,8 @@ export interface ConnectOpts {
 export class Session {
   private tokens = new Map<string, string>();
   live: Live | null = null;
+  /** Set when the live connection closes or the server reports an error; the session must stop. */
+  dropped: string | null = null;
 
   constructor(readonly client: Client, readonly o: ConnectOpts, private readonly write: (o: Output) => void) {
     if (o.dock) this.tokens.set('streamer', o.dock);
@@ -59,7 +61,13 @@ export class Session {
     this.live.on((m: ServerMessage) => {
       if (m.type === 'events') for (const e of m.events) this.write(eventOut(e));
       if (m.type === 'config-changed') this.write({ kind: 'note', at: 0, text: `Config changed (version ${m.configVersion})` });
+      if (m.type === 'error') this.dropped ??= m.message;
     });
+  }
+
+  /** Throws once the live connection is gone, so a session never carries on blind. */
+  check(): void {
+    if (this.dropped) throw new CliError(this.dropped);
   }
 
   async send(as: string, command: Record<string, unknown> & { type: string }): Promise<Answer> {
@@ -102,10 +110,12 @@ export async function connect(o: ConnectOpts): Promise<number> {
     const parsed = lines.map(([l, n]) => parseConnectLine(l, n));
     await s.open();
     for (const line of parsed) {
+      s.check();
       if ('pause' in line) await s.pause(line.pause);
       else await s.send(line.as, line.command);
     }
     await new Promise((r) => setTimeout(r, 100));
+    s.check();
     return 0;
   } catch (e) {
     if (e instanceof CliError) {

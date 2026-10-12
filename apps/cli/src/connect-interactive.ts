@@ -17,6 +17,7 @@ export async function interactive(s: Session, o: ConnectOpts, write: (o: Output)
   for await (const text of rl) {
     let quit = false;
     try {
+      s.check();
       const trimmed = text.trim();
       if (trimmed.startsWith('pause')) {
         const arg = trimmed.split(/\s+/)[1];
@@ -50,8 +51,9 @@ export async function interactive(s: Session, o: ConnectOpts, write: (o: Output)
         }
       }
     } catch (e) {
-      if (e instanceof CliError) note(e.message);
-      else throw e;
+      if (!(e instanceof CliError)) throw e;
+      note(e.message);
+      if (s.dropped) { rl.close(); return 1; }
     }
     if (quit) break;
     if (tty) rl.prompt();

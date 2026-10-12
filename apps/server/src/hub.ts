@@ -24,7 +24,14 @@ export class Hub {
     }
     set.add(conn);
     const view = conn.role === 'viewer' ? await room.watch(conn.character!) : await room.view({ role: conn.role } as { role: 'dock' | 'overlay' });
+    if (!this.conns.get(room)?.has(conn)) return; // closed while we waited
     conn.send({ type: 'welcome', role: conn.role, character: conn.character, view });
+  }
+
+  connections(): number {
+    let n = 0;
+    for (const set of this.conns.values()) n += set.size;
+    return n;
   }
 
   remove(room: Room, conn: Conn): void {

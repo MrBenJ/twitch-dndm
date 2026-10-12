@@ -63,7 +63,7 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     await manager.boot();
     manager.startSweeper();
     const hub = new Hub();
-    const app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev });
+    const app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev, log: opts.log });
     const url = opts.port !== undefined ? await app.listen({ port: opts.port, host: opts.host ?? '127.0.0.1' }) : '';
     return {
       app, manager, hub, store, secrets, url,

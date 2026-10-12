@@ -72,6 +72,20 @@ describe('dndm connect --script (spec 2a §1.1 criterion 1)', () => {
     expect(r.json).toContainEqual(expect.objectContaining({ kind: 'note', text: expect.stringMatching(/No events/) }));
   });
 
+  it('stops with an error when the live connection drops (README decision 12)', async () => {
+    const store = Store.open(t.url);
+    const c = await createChannel({ store, secrets: new Secrets(SECRET), bundles: await officialBundles(), name: 'drop', config: defaultConfig(), seed: 1 });
+    await store.close();
+    const file = script([
+      { as: 'streamer', command: { type: 'regenerateDockUrl' } },
+      { pause: '0.3s' },
+      { as: 'streamer', command: { type: 'postMessage', text: 'still here?' } },
+    ]);
+    const r = await cli(['connect', srv.url, '--channel', c.id, '--dock', c.dockToken, '--script', file]);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/live connection closed \(4403/);
+  });
+
   it("explains a server that isn't there", async () => {
     const file = script([{ as: 'streamer', command: { type: 'openSession' } }]);
     const r = await cli(['connect', 'http://127.0.0.1:1', '--channel', made.id, '--dock', made.dockToken, '--script', file]);
@@ -89,7 +103,6 @@ describe('dndm connect --script (spec 2a §1.1 criterion 1)', () => {
     const r = await cli(['connect', prod.url, '--channel', c2.id, '--dock', c2.dockToken, '--script', file]);
     await prod.close();
     await t2.drop();
-    expect(r.code).toBe(1);
-    expect(r.out).toMatch(/dev login is off on this server/);
+    expect({ code: r.code, out: r.out }).toMatchObject({ code: 1, out: expect.stringMatching(/dev login is off on this server/) });
   });
 });
