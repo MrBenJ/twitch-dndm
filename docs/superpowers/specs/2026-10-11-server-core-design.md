@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2a: Server Core
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 2)
+**Status:** Draft for owner review (revision 3)
 **Roadmap:** `docs/roadmap.md`, Project 2 (split into 2a, this spec, and 2b, the Twitch layer)
 **Builds on:** `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over the parts of `2026-10-08-core-game-design.md` (rev 7) §3, §6, §7, §8 and §12 that don't need Twitch, revised for the modular engine.
 
@@ -54,7 +54,7 @@ TypeScript, pnpm workspaces, Node ≥ 24, Vitest and Zod, as in Project 1. New: 
   - **Hub**: WebSocket connections per channel, grouped by role (§5).
   - **HTTP API**: commands and reads (§4).
 - **`packages/protocol`** (new): Zod schemas and types for every HTTP and WebSocket message, shared by the server, the CLI and, later, the screens.
-- **`packages/engine`**: two changes, partial character state and event audiences (§7). The server also uses `engine.view(game, characterId | null, now)`, which Project 1 already added (Project 1 plan README, decision 1).
+- **`packages/engine`**: three changes: partial character state, event audiences and per-character catch-up (§7). The server also uses `engine.view(game, characterId | null, now)`, which Project 1 already added (Project 1 plan README, decision 1).
 - **`apps/cli`**: two additions, `dndm connect` and `dndm server` (§8).
 - **Packs**: official packs stay as folders in `packs/`, loaded once at boot by `pack-loader`. A channel's config says which ones it uses.
 
@@ -78,7 +78,8 @@ Three tables, defined with Drizzle and migrated with `drizzle-kit`. Migrations a
 - **`characters`**: one row per (channel, character).
   - `channel_id`, `id` (primary key together)
   - `data` (jsonb): the engine's `Character`
-  - `wake_at`: the character's earliest timer end, or null (§6.4)
+  - `wake_at`: the character's earliest timer (§6.4), or null
+  - `removed` (boolean): a copy of the character's "removed by the streamer" flag, so Rooms that need it can be found (§6.4)
   - `updated_at`
 
 Rules:
@@ -95,15 +96,15 @@ Rules:
 
 `POST /channels/:channel/commands`, body `{ id, command }`.
 
-- `id`: a client-made request ID (1–64 characters). A repeated ID from the same sender within 5 minutes returns the first answer instead of running the command again. IDs are kept in memory only: after a server restart, or after 5 minutes, a repeated ID runs the command again. This is accepted.
+- `id`: a client-made request ID (1–64 characters). A repeated ID from the same sender within 5 minutes returns the first answer instead of running the command again. IDs are kept in memory only: after a server restart, or after 5 minutes, a repeated ID runs the command again. This is accepted, and replaces rev 7 §12's "a repeated request ID is ignored" on purpose: keeping IDs across restarts would cost a write on every command.
 - `command` is one of:
   - an **engine command**, with exactly the shapes `dndm run` uses (`join`, `use`, `spawn`, `heal`, …);
   - a **server command**:
     - `getConfig` → the config document and its `config_version`
     - `validateConfig(config)` → the validation errors, or none; changes nothing
     - `updateConfig(config, basedOn)` → applies a new config (§6.5); `basedOn` is the `config_version` the edit started from
-    - `regenerateDockUrl`, `regenerateOverlayUrl` → a new token; the old one stops working at once
-- Answer: `{ ok: true, events, result? }` or `{ ok: false, error: { code, message } }`.
+    - `regenerateDockUrl`, `regenerateOverlayUrl` → a new token; the old one stops working at once, and open WebSocket connections that used it are closed
+- Answer: `{ ok: true, events, result? }` or `{ ok: false, error: { code, message } }`. `events` are filtered for the sender by the same audience rule as the Hub (§5).
 - Error codes: the engine's own rejection codes, plus `unauthorized`, `forbidden`, `streamer-only`, `bad-command`, `rate-limited`, `stale-config`, `invalid-config`, `content-in-use`, `save-failed`, `unknown-channel`, `internal`.
 
 ### 4.2 Reads
@@ -134,7 +135,7 @@ Rules:
   - the dock and overlay get the public view;
   - a viewer gets their own view.
 - **After each input** that produced events or changed state:
-  - events go to their audience (§7.2): public events to everyone; events with an audience only to the dock and to those characters' viewer connections;
+  - events go to their audience (§7.2): public events to everyone; events with an audience only to the dock and to those characters' viewer connections, never to the overlay. The dock sees every event: the streamer runs the story, so they see secret shops too. This clarifies engine spec §9.6, whose "only members … can see it" is about viewers;
   - the dock and overlay get the new public view;
   - each connected viewer gets their new view, only if it changed.
 - **After a config change**, everyone gets a `config-changed` message and fetches `describe` again.
@@ -158,10 +159,11 @@ Nothing is broadcast or answered before the save commits.
 ### 6.2 Characters in memory
 
 - **Loading.** Before calling the engine, the Room loads the sender's character and any character named in the command, if they aren't loaded already. A character that doesn't exist yet is created by the engine as today (on `join`). A view read (§4.2) or a viewer's WebSocket connection (§5) loads that viewer's character the same way.
-- **Every load catches up.** Loading a Room or a character always runs `engine.resume(game, now)` before anything else, as the engine requires after any load. Whatever expired or came due while it was unloaded is handled then. Loading a character into a Room that is already running is an input like any other (§6.1), so its results are saved and broadcast.
+- **Loading a Room** loads its `rooms` row, every party member and every character marked "removed by the streamer", then runs `engine.resume(game, now)` once, as the engine requires after loading a saved game.
+- **Loading one character into a running Room** never calls `resume`, which would reset the monster's turn (engine §6.10). It calls `engine.catchUp(game, characterId, now)` instead (§7.3), which handles only that character's knockout and statuses that ended or came due while they were unloaded. This is an input like any other (§6.1), so its results are saved and broadcast.
 - **Staying loaded.** A character stays loaded while any of these is true:
   - they're in the party;
-  - they have a running timer (a knockout, or a status with an end time or a tick);
+  - they have a running timer: a knockout, or a status with an end time or a next tick (cooldowns don't count: nothing happens when one ends);
   - they're marked "removed by the streamer" and the party hasn't rested since;
   - they have an open viewer connection;
   - they were part of an input or a view read in the last 10 minutes.
@@ -173,7 +175,8 @@ The Room keeps the state from before the input and drops the new one. A command 
 
 ### 6.4 Restart
 
-- At boot, the server loads every Room that has a session open or any character with a running timer, and calls `engine.resume(game, now)`, which applies the restart rules (including `fullIntervalAfterRestart`). Those characters are loaded with it. To find them without reading every character, the `characters` table keeps `wake_at`: the character's earliest timer end, or null. It is written with the character.
+- At boot, the server loads every Room that has a session open, a character marked "removed by the streamer", or a character with a `wake_at`. Loading it (§6.2) runs `engine.resume(game, now)`, which applies the restart rules (including `fullIntervalAfterRestart`). Characters with a `wake_at` are loaded with it.
+- `wake_at` is the earliest of the character's knockout end, status end times and status next ticks, or null. Cooldowns are not included. It is written with the character, so the server finds these Rooms without reading every character.
 - Because every input is saved before anyone hears about it, a crash loses only inputs nobody was told about.
 
 ### 6.5 Config changes
@@ -190,7 +193,7 @@ If any step fails, nothing changes. Changes are allowed at any time, including m
 
 ### 6.6 Loading and unloading
 
-- Any other Room is loaded on its first request (with `resume`, §6.2). A Room is unloaded after 30 minutes with no session open, no input, no open connection and no loaded character with a running timer.
+- Any other Room is loaded on its first request (with `resume`, §6.2). A Room is unloaded after 30 minutes with no session open, no input, no open connection, no loaded character with a running timer and no character marked "removed by the streamer".
 - At boot the server takes a Postgres advisory lock. A second server against the same database refuses to start, so there is never a second copy of a Room.
 
 ### 6.7 Errors
@@ -212,7 +215,13 @@ The engine must work when `GameState.characters` holds only some of a channel's 
 
 - A `GameEvent` gains an optional `audience`: a list of character IDs. No audience means public.
 - Plugins set it when they emit (for example, a secret shop's events go to the members who can see it, engine spec §9.6).
-- The engine only carries the field; the Hub (§5) decides who receives the event. `dndm run` and `dndm play` show every event, as today.
+- The engine only carries the field; the Hub (§5) and command answers (§4.1) decide who receives the event. `dndm run` and `dndm play` show every event, as today.
+
+### 7.3 Per-character catch-up
+
+- `engine.catchUp(game, characterId, now)` applies to one character the same rules `resume` applies to characters after a load: knockouts and statuses that ended during the downtime end, and missed ticks are handled as `resume` handles them.
+- It never touches the session, the encounter or monster timers.
+- Tests: loading a character mid-fight with `catchUp` doesn't move the monster's next turn, and a character caught up this way ends in the same state as after a full `resume`.
 
 ## 8. CLI additions
 
@@ -250,7 +259,7 @@ Only when the server runs with `DNDM_DEV=1`; the route isn't registered otherwis
 
 | Level | What | How |
 |---|---|---|
-| Engine | partial character state (§7.1), the stay-loaded rule, event audiences (§7.2) | Vitest, as today |
+| Engine | partial character state (§7.1), the stay-loaded rule, event audiences (§7.2), `catchUp` (§7.3) | Vitest, as today |
 | Room | input order; loading and dropping characters; save before broadcast; a failed save keeps the old state; timer retry; config changes, `stale-config`, `invalid-config` and `content-in-use`; restart and resume mid-fight | Vitest, real Postgres, fake clock |
 | Server | auth per role; viewers acting only as themselves; repeated request IDs; rate limit; WebSocket full picture on connect and reconnect; `config-changed`; dev login absent without `DNDM_DEV=1`; the advisory lock; two channels kept separate | Vitest against a running Fastify app and real Postgres |
 | End to end | the Project 1 golden scripts played through the server with a fake clock give the same events as `dndm run`, after mapping `dev:<name>` back to `<name>` | golden test |
