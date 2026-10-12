@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@dndm/engine": "workspace:*",
-    "@dndm/pack-loader": "workspace:*"
+    "@dndm/pack-loader": "workspace:*",
+    "@dndm/server": "workspace:*"
   }
 }
