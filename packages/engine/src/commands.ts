@@ -150,3 +150,15 @@ export function runCommand(rt: Runtime, cmd: Command): void {
     case 'postMessage': return postMessage(rt, cmd.text);
   }
 }
+
+/** The character IDs a command names (spec 2a §6.2). The server loads them before applying it. */
+export function commandCharacters(raw: unknown): string[] {
+  let cmd: Command;
+  try { cmd = checkCommand(raw); } catch { return []; }
+  const out = new Set<string>();
+  if ('character' in cmd && typeof cmd.character === 'string') out.add(cmd.character);
+  if (cmd.type === 'use' && cmd.chosen?.kind === 'character') out.add(cmd.chosen.id);
+  if ((cmd.type === 'applyStatus' || cmd.type === 'removeStatus') && cmd.target.kind === 'character') out.add(cmd.target.id);
+  if ((cmd.type === 'giveXp' || cmd.type === 'giveGold' || cmd.type === 'giveItem') && cmd.target !== 'party') out.add(cmd.target);
+  return [...out];
+}

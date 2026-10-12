@@ -7,7 +7,7 @@ import { buildRegistry, type Registry } from './registry';
 import { Runtime } from './runtime';
 import { settle } from './settle';
 import { type GameState, isFight, newGameState } from './state';
-import { advanceTo, nextWake, resumeAt } from './time';
+import { advanceTo, characterWakeAt, nextWake, resumeAt } from './time';
 import { view, type View } from './view';
 
 export type ApplyResult =
@@ -25,6 +25,8 @@ export interface Engine {
   resume(game: GameState, now: number): { game: GameState; events: GameEvent[] };
   adopt(game: GameState): GameState;
   view(game: GameState, characterId: string | null, now: number): View;
+  /** The character's earliest timer, or null (spec 2a §6.4). Reads only; doesn't copy the game. */
+  characterWake(game: GameState, characterId: string): number | null;
 }
 
 export function toError(e: unknown): { code: string; message: string } | null {
@@ -87,6 +89,7 @@ export function createEngine(opts: { packs: PackBundle[]; channel: unknown }): E
       if (adv && !registry.adventures.has(adv.id)) throw missing('adventure');
       return game;
     },
+    characterWake: (game, characterId) => (game.characters[characterId] ? characterWakeAt(new Runtime(registry, game), characterId) : null),
     view(game, characterId, now) {
       const rt = new Runtime(registry, structuredClone(game));
       rt.now = Math.max(now, game.clock);
