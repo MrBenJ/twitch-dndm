@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2a: Server Core
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 3)
+**Status:** Draft for owner review (revision 4)
 **Roadmap:** `docs/roadmap.md`, Project 2 (split into 2a, this spec, and 2b, the Twitch layer)
 **Builds on:** `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over the parts of `2026-10-08-core-game-design.md` (rev 7) §3, §6, §7, §8 and §12 that don't need Twitch, revised for the modular engine.
 
@@ -74,12 +74,13 @@ Three tables, defined with Drizzle and migrated with `drizzle-kit`. Migrations a
   - `state_version` (the `GameState` version)
   - `clock`, `rng`, `seq`
   - `session` (jsonb, null when no session is open)
+  - `recent_requests` (jsonb): request IDs from the last 5 minutes with their answers (§4.1)
   - `saved_at`
 - **`characters`**: one row per (channel, character).
   - `channel_id`, `id` (primary key together)
   - `data` (jsonb): the engine's `Character`
   - `wake_at`: the character's earliest timer (§6.4), or null
-  - `removed` (boolean): a copy of the character's "removed by the streamer" flag, so Rooms that need it can be found (§6.4)
+  - `removed` (boolean): a copy of the character's "removed by the streamer" flag, so a Room can find those characters when it loads (§6.2)
   - `updated_at`
 
 Rules:
@@ -96,7 +97,7 @@ Rules:
 
 `POST /channels/:channel/commands`, body `{ id, command }`.
 
-- `id`: a client-made request ID (1–64 characters). A repeated ID from the same sender within 5 minutes returns the first answer instead of running the command again. IDs are kept in memory only: after a server restart, or after 5 minutes, a repeated ID runs the command again. This is accepted, and replaces rev 7 §12's "a repeated request ID is ignored" on purpose: keeping IDs across restarts would cost a write on every command.
+- `id`: a client-made request ID (1–64 characters). A repeated ID from the same sender within 5 minutes returns the first answer instead of running the command again, including after a server restart (rev 7 §12). The IDs of accepted commands are saved in `rooms.recent_requests`, in the same transaction as the input (§6.1). A rejected command changes nothing and saves nothing, so repeating it runs the checks again.
 - `command` is one of:
   - an **engine command**, with exactly the shapes `dndm run` uses (`join`, `use`, `spawn`, `heal`, …);
   - a **server command**:
@@ -125,7 +126,7 @@ Rules:
 
 ### 4.4 Rate limit
 
-5 commands per second per viewer and 20 per second per dock token; more are rejected with `rate-limited`. This is server protection, not a game rule.
+5 requests per second per viewer and 20 per second per dock token; more are rejected with `rate-limited`. Commands, view reads and WebSocket connects all count. The limiter measures time with the server's injected clock. This is server protection, not a game rule. The end-to-end test (§9) runs with rate limits turned off, as a test setting.
 
 ## 5. Live updates (WebSocket)
 
@@ -135,18 +136,19 @@ Rules:
   - the dock and overlay get the public view;
   - a viewer gets their own view.
 - **After each input** that produced events or changed state:
-  - events go to their audience (§7.2): public events to everyone; events with an audience only to the dock and to those characters' viewer connections, never to the overlay. The dock sees every event: the streamer runs the story, so they see secret shops too. This clarifies engine spec §9.6, whose "only members … can see it" is about viewers;
+  - events go to their audience (§7.2): public events to everyone; events with an audience only to the dock and to those characters' viewer connections, never to the overlay. The dock sees every event (engine spec §9.6);
   - the dock and overlay get the new public view;
   - each connected viewer gets their new view, only if it changed.
 - **After a config change**, everyone gets a `config-changed` message and fetches `describe` again.
 - Clients reconnect on their own with backoff and get a full picture again.
-- In 2a, viewer connections stand in for Extension PubSub. 2b replaces that path without changing the Room.
+- The Hub tells the Room which characters are **watched** (`room.watch(id)`, `room.unwatch(id)`). In 2a a viewer is watched while their WebSocket is open. Watched characters stay loaded (§6.2) and get their view after each input.
+- In 2a, viewer connections stand in for Extension PubSub. 2b replaces that path, and decides what "watched" means, without changing the Room.
 
 ## 6. The Room
 
 ### 6.1 The input loop
 
-Each Room has one queue. Inputs are commands, a timer firing and config changes, handled one at a time:
+Each Room has one queue. Inputs are commands, a timer firing, config changes and character catch-ups (§6.2), handled one at a time:
 
 1. Load the characters the input needs (§6.2).
 2. Call the engine with `now` from an injected clock (tests use a fake clock).
@@ -159,13 +161,14 @@ Nothing is broadcast or answered before the save commits.
 ### 6.2 Characters in memory
 
 - **Loading.** Before calling the engine, the Room loads the sender's character and any character named in the command, if they aren't loaded already. A character that doesn't exist yet is created by the engine as today (on `join`). A view read (§4.2) or a viewer's WebSocket connection (§5) loads that viewer's character the same way.
-- **Loading a Room** loads its `rooms` row, every party member and every character marked "removed by the streamer", then runs `engine.resume(game, now)` once, as the engine requires after loading a saved game.
+- **Loading a Room** (at boot or on demand) is the only definition used anywhere: it loads its `rooms` row, every party member, every character with a `wake_at` (§6.4) and, if a session is open, every character marked "removed by the streamer". Then it runs `engine.resume(game, now)` once, as the engine requires after loading a saved game.
+- **Opening a session** loads every character marked "removed by the streamer" first, so the flag can clear at the session's first rest.
 - **Loading one character into a running Room** never calls `resume`, which would reset the monster's turn (engine §6.10). It calls `engine.catchUp(game, characterId, now)` instead (§7.3), which handles only that character's knockout and statuses that ended or came due while they were unloaded. This is an input like any other (§6.1), so its results are saved and broadcast.
 - **Staying loaded.** A character stays loaded while any of these is true:
   - they're in the party;
   - they have a running timer: a knockout, or a status with an end time or a next tick (cooldowns don't count: nothing happens when one ends);
-  - they're marked "removed by the streamer" and the party hasn't rested since;
-  - they have an open viewer connection;
+  - a session is open, `streamerRemovalWaitsForRest` is on, and they're marked "removed by the streamer" (the flag clears at the next rest, engine spec §6.3);
+  - they're watched (§5);
   - they were part of an input or a view read in the last 10 minutes.
 - Anyone else is dropped from memory. They're already saved, so nothing is lost.
 
@@ -175,7 +178,7 @@ The Room keeps the state from before the input and drops the new one. A command 
 
 ### 6.4 Restart
 
-- At boot, the server loads every Room that has a session open, a character marked "removed by the streamer", or a character with a `wake_at`. Loading it (§6.2) runs `engine.resume(game, now)`, which applies the restart rules (including `fullIntervalAfterRestart`). Characters with a `wake_at` are loaded with it.
+- At boot, the server loads (§6.2) every Room that has a session open or a character with a `wake_at`. Loading runs `engine.resume(game, now)`, which applies the restart rules (including `fullIntervalAfterRestart`).
 - `wake_at` is the earliest of the character's knockout end, status end times and status next ticks, or null. Cooldowns are not included. It is written with the character, so the server finds these Rooms without reading every character.
 - Because every input is saved before anyone hears about it, a crash loses only inputs nobody was told about.
 
@@ -193,7 +196,7 @@ If any step fails, nothing changes. Changes are allowed at any time, including m
 
 ### 6.6 Loading and unloading
 
-- Any other Room is loaded on its first request (with `resume`, §6.2). A Room is unloaded after 30 minutes with no session open, no input, no open connection, no loaded character with a running timer and no character marked "removed by the streamer".
+- Any other Room is loaded on its first request (with `resume`, §6.2). A Room is unloaded after 30 minutes with no session open, no input, no watched character and no loaded character with a running timer.
 - At boot the server takes a Postgres advisory lock. A second server against the same database refuses to start, so there is never a second copy of a Room.
 
 ### 6.7 Errors

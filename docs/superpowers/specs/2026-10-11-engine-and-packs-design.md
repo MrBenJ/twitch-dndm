@@ -620,7 +620,7 @@ All three use `targets-per: 5` and set `crit-chance: 0` (monster hits don't crit
 | `trap` | `prompt`, `time`, either `taps: N%` or `answer` + `choices`, `penalty: { target: all \| non-responders, steps }` | `tap-button`, or `choices` | at `time`. Disarmed if at least N% of party members tapped, or if the most-voted choice is `answer`. Otherwise the penalty steps run on the chosen targets (no source; §5.5) | `disarmed`, `triggered` |
 | `shop` | `stock: [{ item, price }]`, `time?`, `secret?` | `shop-list`; `respond: { buy: item }` | at `time`, or when the streamer ends it | `closed` |
 
-- A secret shop shows no overlay scene, and only members who were in the party when it opened can see it or buy.
+- A secret shop shows no overlay scene, and only members who were in the party when it opened can see it or buy. The streamer's dock sees everything, secret shops included (Project 2a spec §5).
 - Buying calls `ctx.spendGold` then `ctx.giveItem`, and emits `starter:purchased`. Starting items can't be bought.
 - The streamer's `endEncounter` on a vote uses the current leader (`endEarly`); on a trap it counts as `disarmed`.
 
