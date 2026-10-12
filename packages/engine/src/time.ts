@@ -184,3 +184,10 @@ export function resumeAt(rt: Runtime, now: number): void {
   }
   settle(rt);
 }
+
+/** One character's earliest timer: knockout end, status end or status tick (spec 2a §6.4). Cooldowns don't count. */
+export function characterWakeAt(rt: Runtime, id: string): number | null {
+  const prefix = `character:${id}:`;
+  const mine = dueItems(rt).filter((d) => (d.order === 0 && d.key === id) || ((d.order === 1 || d.order === 2) && d.key.startsWith(prefix)));
+  return mine.length ? Math.min(...mine.map((d) => d.at)) : null;
+}

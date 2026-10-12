@@ -12,6 +12,22 @@ import type { Runtime } from './runtime';
 import { clearRemovals } from './session';
 import { isFight, type KindEncounterState, type Origin, type SessionState } from './state';
 
+/** Spec 2a §7.2: events produced while handling a kind encounter get its audience, if it declares one. */
+function stampAudience(rt: Runtime, enc: KindEncounterState, from: number): void {
+  const kind = rt.reg.kinds.get(enc.kind);
+  if (!kind?.def.audience) return;
+  const audience = callPlugin(kind.pack, `${kind.id} audience`, () => {
+    const a = kind.def.audience!(enc.state, enc.params);
+    if (a !== null && (!Array.isArray(a) || a.some((x) => typeof x !== 'string'))) throw new Error('audience must return a list of character IDs or null');
+    return a;
+  });
+  if (!audience) return;
+  for (let i = from; i < rt.events.length; i++) {
+    const e = rt.events[i]!;
+    if (!e.audience) e.audience = [...audience];
+  }
+}
+
 export function requireResting(rt: Runtime): SessionState {
   const s = rt.game.session;
   if (!s) throw new Rejection('No session is open', 'no-session');
@@ -30,9 +46,11 @@ export function startEncounter(rt: Runtime, spec: EncounterSpec, origin: Origin 
   const kind = rt.reg.kinds.get(spec.kind);
   if (!kind) throw new Rejection('Unknown encounter kind', 'unknown-content');
   const enc: KindEncounterState = { kind: spec.kind, startedAt: rt.now, origin, params: spec.params, state: null };
+  const from = rt.events.length;
   s.encounter = enc;
   enc.state = callPlugin(kind.pack, `${kind.id} start`, () => kind.def.start(makeCtx(rt, kind.pack), spec.params));
   rt.emit('core:encounter-started', `${kind.def.name} begins`, { kind: spec.kind });
+  stampAudience(rt, enc, from);
   react(rt, { type: 'encounterStarted', kind: spec.kind }, present(rt));
 }
 
@@ -87,6 +105,7 @@ export function finishEncounter(rt: Runtime, outcome: string): void {
   if (!allowedOutcomes(rt).includes(outcome)) {
     throw new Error(`Encounter ${enc.kind} can't end with '${outcome}'`);
   }
+  const from = rt.events.length;
   if (isFight(enc)) endFight(rt, enc, outcome);
   else {
     const kind = rt.reg.kinds.get(enc.kind)!;
@@ -95,6 +114,7 @@ export function finishEncounter(rt: Runtime, outcome: string): void {
   const who = present(rt);
   s.encounter = null;
   rt.emit('core:encounter-ended', `The encounter ends (${outcome})`, { kind: enc.kind, outcome });
+  if (!isFight(enc)) stampAudience(rt, enc, from);
   react(rt, { type: 'encounterEnded', kind: enc.kind, outcome }, who);
   clearRemovals(rt);
   if (enc.origin && s.adventure && s.adventure.id === enc.origin.adventure) {
@@ -122,13 +142,17 @@ export function respond(rt: Runtime, id: string, input: unknown): void {
   const nctx = runtimeNormalizeCtx(rt, kind.pack);
   const value = normalizeParams(kind.def.input ?? p.object({}), input ?? {}, nctx);
   if (nctx.issues.length) throw new Rejection(nctx.issues[0]!, 'invalid-input');
+  const from = rt.events.length;
   enc.state = callPlugin(kind.pack, `${kind.id} respond`, () =>
     kind.def.respond(makeCtx(rt, kind.pack), enc.state, charRef(id), value, enc.params));
+  stampAudience(rt, enc, from);
 }
 
 export function kindWake(rt: Runtime): void {
   const enc = rt.game.session?.encounter;
   if (!enc || isFight(enc)) return;
   const kind = rt.reg.kinds.get(enc.kind)!;
+  const from = rt.events.length;
   enc.state = callPlugin(kind.pack, `${kind.id} advance`, () => kind.def.advance(makeCtx(rt, kind.pack), enc.state, enc.params));
+  stampAudience(rt, enc, from);
 }

@@ -22,4 +22,11 @@ describe('dndm main', () => {
     expect(r.code).toBe(2);
     expect(r.out.trim()).toBe('error: --seed must be a whole number of 0 or more');
   });
+
+  it('accepts a generated dock token that starts with a dash', async () => {
+    const token = `-${'A'.repeat(42)}`;
+    const r = await cli(['connect', 'http://127.0.0.1:1', '--channel', '00000000-0000-0000-0000-000000000000', '--dock', token]);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/can't reach the server/);
+  });
 });

@@ -215,5 +215,6 @@ export function registerKinds(api: PackApi): void {
       list: (params.stock as { item: string; price: number }[]).map((e) => `${e.item}: ${e.price} gold`),
       ...closes(s.closesAt),
     }),
+    audience: (s, params) => (params.secret ? s.members : null),
   });
 }

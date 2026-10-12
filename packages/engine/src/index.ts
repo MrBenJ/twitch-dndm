@@ -9,6 +9,7 @@ export type { Settings } from './channel';
 export type { Description } from './describe';
 export { formatDuration, parseDuration, parsePercent } from './units';
 export type { Command } from './commands';
+export { commandCharacters, VIEWER_COMMANDS } from './commands';
 export type { ApplyResult } from './engine';
 export type { GameEvent } from './events';
 export type { GameState, Character, FightState, KindEncounterState, MonsterState, SessionState, StatusInstance } from './state';

@@ -1,0 +1,10 @@
+# Local Postgres for the server and its tests (Project 2a plans README).
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: dndm
+      POSTGRES_PASSWORD: dndm
+      POSTGRES_DB: dndm
+    ports:
+      - "127.0.0.1:5455:5432"

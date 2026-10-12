@@ -131,6 +131,8 @@ export interface EncounterKindDef<S = any> {
   onEnd?(ctx: Ctx, state: S, outcome: string, params: any): void;
   panel(state: S, viewer: Viewer, params: any): Widget;
   overlay(state: S, params: any): Scene | null;
+  /** Who may see this encounter's events (spec 2a §7.2). null or absent: everyone. */
+  audience?(state: S, params: any): string[] | null;
 }
 
 export interface PackApi {
@@ -180,6 +182,6 @@ export interface Ctx {
   spendGold(character: EntityRef, amount: number): void;
   giveItem(character: EntityRef, item: string, count?: number): void;
   endEncounter(outcome: string): void;
-  emit(type: string, data: Record<string, unknown>, text: string): void;
+  emit(type: string, data: Record<string, unknown>, text: string, opts?: { audience?: EntityRef[] }): void;
   setStore(e: EntityRef, data: unknown): void;
 }
