@@ -13,8 +13,8 @@ Project 2a (server core) is split into three plans. Run them in order: each depe
 ## Running Postgres for tests
 
 ```bash
-docker compose up -d postgres        # Postgres 17 on localhost:5433, user/password/db: dndm
-export DATABASE_URL=postgres://dndm:dndm@localhost:5433/dndm
+docker compose up -d postgres        # Postgres 17 on localhost:5455, user/password/db: dndm
+export DATABASE_URL=postgres://dndm:dndm@localhost:5455/dndm
 pnpm test
 ```
 

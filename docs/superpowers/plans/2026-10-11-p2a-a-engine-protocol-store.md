@@ -796,7 +796,7 @@ services:
       POSTGRES_PASSWORD: dndm
       POSTGRES_DB: dndm
     ports:
-      - "5433:5432"
+      - "5455:5432"
 ```
 
 `apps/server/package.json`:
@@ -831,7 +831,7 @@ export default defineConfig({
   dialect: 'postgresql',
   schema: './src/db/schema.ts',
   out: './drizzle',
-  dbCredentials: { url: process.env.DATABASE_URL ?? 'postgres://dndm:dndm@localhost:5433/dndm' },
+  dbCredentials: { url: process.env.DATABASE_URL ?? 'postgres://dndm:dndm@localhost:5455/dndm' },
 });
 ```
 
@@ -938,7 +938,7 @@ import { randomBytes } from 'node:crypto';
 import postgres from 'postgres';
 import { connect, type Db, migrate, type Sql } from '../../src/db/connect';
 
-export const ADMIN_URL = process.env.DATABASE_URL ?? 'postgres://dndm:dndm@localhost:5433/dndm';
+export const ADMIN_URL = process.env.DATABASE_URL ?? 'postgres://dndm:dndm@localhost:5455/dndm';
 
 /** A brand-new, migrated database for one test file. */
 export async function freshDb(): Promise<{ url: string; db: Db; sql: Sql; drop(): Promise<void> }> {
