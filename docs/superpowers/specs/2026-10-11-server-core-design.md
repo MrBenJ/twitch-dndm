@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2a: Server Core
 
 **Date:** 2026-10-11
-**Status:** Draft for owner review (revision 6)
+**Status:** Draft for owner review (revision 7)
 **Roadmap:** `docs/roadmap.md`, Project 2 (split into 2a, this spec, and 2b, the Twitch layer)
 **Builds on:** `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over the parts of `2026-10-08-core-game-design.md` (rev 7) §3, §6, §7, §8 and §12 that don't need Twitch, revised for the modular engine.
 
@@ -97,14 +97,14 @@ Rules:
 
 `POST /channels/:channel/commands`, body `{ id, command }`.
 
-- `id`: a client-made request ID (1–64 characters). A repeated ID from the same sender within 5 minutes returns the first answer instead of running the command again, including after a server restart (rev 7 §12). The IDs of accepted commands are saved in `rooms.recent_requests`, in the same transaction as the input (§6.1). A rejected command changes nothing and saves nothing, so repeating it runs the checks again.
+- `id`: a client-made request ID (1–64 characters). For an **accepted command that changes state**, a repeated ID from the same sender within 5 minutes returns the first answer instead of running the command again, including after a server restart (rev 7 §12). These IDs and answers are saved in `rooms.recent_requests`, in the same transaction as the input (§6.1). Rejected commands and read-only commands change nothing, so a repeated ID simply runs them again and may get a different answer.
 - `command` is one of:
-  - an **engine command**, with exactly the shapes `dndm run` uses (`join`, `use`, `spawn`, `heal`, …);
+  - an **engine command**, with exactly the engine's command shapes (engine spec §11.2), the same ones `dndm run` uses (`join`, `use`, `spawnMonster`, `healPlayer`, …);
   - a **server command**:
     - `getConfig` → the config document and its `config_version`
     - `validateConfig(config)` → the validation errors, or none; changes nothing
     - `updateConfig(config, basedOn)` → applies a new config (§6.5); `basedOn` is the `config_version` the edit started from
-    - `regenerateDockUrl`, `regenerateOverlayUrl` → a new token; the old one stops working at once, and open WebSocket connections that used it are closed. Regenerate answers are not kept in `recent_requests` (tokens are only ever stored encrypted), so repeating one makes another new token
+    - `regenerateDockUrl`, `regenerateOverlayUrl` → a new token; the old one stops working at once, and open WebSocket connections that used it are closed. Regenerate answers are kept in `recent_requests` like any other, with the token encrypted the same way as in `channels`. A repeat of that request ID within 5 minutes is accepted with the token it replaced, and returns the same new token, so a dock that lost the answer can recover it
 - Answer: `{ ok: true, events, result? }` or `{ ok: false, error: { code, message } }`. `events` are filtered for the sender by the same audience rule as the Hub (§5).
 - Error codes: the engine's own rejection codes, plus `unauthorized`, `forbidden`, `streamer-only`, `bad-command`, `rate-limited`, `stale-config`, `invalid-config`, `content-in-use`, `save-failed`, `unknown-channel`, `internal`.
 
@@ -217,7 +217,8 @@ The engine must work when `GameState.characters` holds only some of a channel's 
 ### 7.2 Event audiences
 
 - A `GameEvent` gains an optional `audience`: a list of character IDs. No audience means public.
-- Plugins set it when they emit (for example, a secret shop's events go to the members who can see it, engine spec §9.6).
+- An encounter kind can declare an audience for a running encounter (an optional `audience(state, params)` hook; a secret shop returns its members, engine spec §9.6). Every event produced while handling that encounter (its start, `respond`, its end and its wake-ups), core events from `ctx` operations included, gets that audience.
+- Plugins can also set an audience on a single `emit`.
 - The engine only carries the field; the Hub (§5) and command answers (§4.1) decide who receives the event. `dndm run` and `dndm play` show every event, as today.
 
 
@@ -249,7 +250,7 @@ dndm connect <server-url> --channel <id> --dock <token> --script game.jsonl
 
 ### 8.3 Dev login
 
-Only when the server runs with `DNDM_DEV=1`; the route isn't registered otherwise.
+Only when the server runs with `DNDM_DEV=1`; the route isn't registered otherwise. It isn't rate limited (§4.4): it only exists in development.
 
 - `POST /dev/login { channel, viewer }` returns a viewer token for `dev:<viewer>` on that channel.
 

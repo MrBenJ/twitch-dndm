@@ -655,6 +655,7 @@ engine.nextWakeTime(game)                             // number | null
 engine.resume(game, now)                              // after loading a save (§6.10)
 engine.adopt(game)                                    // after the channel config changed (§7.4)
 engine.describe()                                     // everything registered, for screens and the CLI
+engine.view(game, characterId | null, now)            // a viewer's view (abilities and targets, panel, overlay, stats); null = public
 ```
 
 - The game state is plain JSON with a `version` number. Saving is storing it; loading is reading it and calling `resume`.
