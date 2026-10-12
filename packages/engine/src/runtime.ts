@@ -26,8 +26,8 @@ export class Runtime {
     return this.reg.settings;
   }
 
-  emit(type: string, text: string, data: Record<string, unknown> = {}): void {
-    this.events.push({ type, at: this.now, text, data });
+  emit(type: string, text: string, data: Record<string, unknown> = {}, audience?: string[]): void {
+    this.events.push({ type, at: this.now, text, data, ...(audience ? { audience } : {}) });
   }
 
   random(): number {

@@ -95,9 +95,10 @@ export function makeCtx(rt: Runtime, pack: string): Ctx {
       if (!allowed.includes(outcome)) throw new Error(`This encounter can't end with '${outcome}' (outcomes: ${allowed.join(', ')})`);
       rt.pendingEnd = outcome;
     },
-    emit: (type, data, text) => {
+    emit: (type, data, text, opts) => {
       if (!type.startsWith(`${pack}:`)) throw new Error(`Custom event types must start with '${pack}:'`);
-      rt.emit(type, text, data);
+      const audience = opts?.audience?.filter((e) => e.kind === 'character').map((e) => e.id);
+      rt.emit(type, text, data, audience);
     },
     setStore: (e, data) => setStore(rt, pack, e, data),
   };
