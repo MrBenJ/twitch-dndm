@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 6)
+**Status:** Draft for owner review (revision 7)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -83,6 +83,7 @@ The Room, RoomManager and Hub keep their 2a jobs. The Room gains the two small a
 - 2a's viewer role row (§4.3) said the extension JWT would be used in 2b. The JWT is used only on the `/ext` routes (§4.1). On the 2a `/channels/:channel/*` routes, the viewer role stays dev login only.
 - Rev 7 §1.2 said "Any streamer can sign up". 2b's default is invite-only through the allowlist (§4.3), and `DNDM_SIGNUP=open` restores open sign-up.
 - 2a §1.2 and the engine spec put media uploads, the optional chat bot and the paid-pack "official" redefinition in Project 2. Media uploads move to Project 3, the chat bot (with chat bans) becomes its own project after Project 3, and the paid-pack redefinition waits for the first paid pack (§1.2, §11.2). Until media uploads exist, monster images stay as pack content provides them (or none).
+- Rev 7 §7.2 said every own-state change "always produces a snapshot". 2b accepts one exception (§5.3, "a known gap"). A change that was pending when a Room unloaded, or at shutdown, and whose send failed, may never reach viewers. This happens only if that Room doesn't load again in the process. Those viewers catch up when they reopen the extension.
 - 2a left 2b to decide what "watched" means. **Twitch viewers are never watched.** A Twitch viewer's character stays loaded through 2a's other rules (party membership, timers, and "part of an input or a view read in the last 10 minutes"). Dev viewers are watched while their WebSocket is open, as in 2a.
 
 ## 3. Data
@@ -138,7 +139,7 @@ Sign-up is only available when Twitch is configured (§7.2).
    - It is `HttpOnly`, `Secure` and `SameSite=Lax`.
    - Sessions aren't stored, so a session can't be revoked early. Signing out clears the cookie.
 
-Taking someone off the allowlist stops new sign-ins only. Their channel, sessions and URLs keep working; regenerating the URLs cuts off the dock and overlay.
+Taking someone off the allowlist stops new sign-ins only. Their channel, sessions and URLs keep working, and a regenerate from their own `/setup` or dock only gives them new URLs. Cutting a channel off (ending its URLs and sessions) is out of scope, like channel deletion (§1.2).
 
 ### 4.4 The setup page
 
@@ -177,7 +178,7 @@ One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Sho
 | Field | Meaning |
 |---|---|
 | `v` | Format version, 1. |
-| `e` | Epoch: 6 random base64url characters, chosen when the Broadcaster starts. When it differs from the one a client holds, the client refetches the roster, whatever `rv` says. |
+| `e` | Epoch: 6 random base64url characters, chosen when the Broadcaster starts. When it differs from the one a client holds, the client refetches the roster, whatever `rv` says, after a random delay in `[0, rw]`. |
 | `t` | Server time (ms) when the snapshot was built. Clients use it to correct their clock for countdowns, and drop a snapshot whose `t` is lower than one they already have (PubSub doesn't guarantee order). |
 | `ph` | The phase from the public view: `closed`, `resting`, `fight` or `encounter`. |
 | `adv` | The public view's `adventure`, or null. |
@@ -226,8 +227,9 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
 - **What it sends.** A snapshot is sent when its content (everything but `t` and `rw`) differs from the last one sent, or its changed list isn't empty. Otherwise nothing is sent.
 - **Config changes.** The snapshot carries `cv`, the channel's `config_version`. A config change moves it, so the next tick sends a snapshot. This stands in for 2a's `config-changed` message on the viewer path.
 - **Keys are kept until delivered.** The changed list is every key from `broadcastState()` since the last successful send. A failed send keeps its keys for the next one.
-- **The roster version.** The Broadcaster keeps the roster it last computed: each party member's ID, name, class and level, in join order, taken from the public view's party entries. `rv` goes up by one whenever the newly computed roster differs from it. It starts at 1 when a Broadcaster starts. Clients refetch the roster when `rv` or `e` is different from what they hold. Because `e` is new with every Broadcaster, a lost update before a restart can't leave a client holding a roster with a matching `rv`.
-- **`rf` on a first snapshot.** A Broadcaster's first snapshot has `rf: true` in two cases only. One is when it starts during boot (§7.4), because changes may have been lost across the restart. The other is when the channel's pacing gate (§5.3) holds keys that were dropped. Otherwise, as for a Room loaded in a running server by a request, the first snapshot is an ordinary one, since nothing was missed.
+- **The roster version.** The Broadcaster keeps the roster it last computed: each party member's ID, name, class and level, in join order, taken from the public view's party entries. `rv` goes up by one whenever the newly computed roster differs from it. It starts at 1 when a Broadcaster starts. Clients refetch the roster when `rv` or `e` is different from what they hold, after a random delay in `[0, rw]`. Because `e` is new with every Broadcaster, a lost update before a restart can't leave a client holding a roster with a matching `rv`.
+- **Shared reads are cached.** `/ext/roster` and `/ext/describe` give every viewer of a channel the same answer. The server builds each one once per (`e`, `rv`) or per `cv`, and serves that copy to every viewer. These audience-wide refetches are spread by `rw`, but they aren't counted in §5.5's own-state target, because each costs a cache lookup, not a Room read.
+- **The first snapshot.** A Broadcaster's first snapshot has `rf: true` in two cases only. One is when it starts during boot (§7.4), because changes may have been lost across the restart. The other is when the channel's pacing gate (§5.3) holds keys that were dropped. In both cases it's sent on the first tick. In every other case, as for a Room loaded in a running server by a request, nothing was missed: the first tick only records the state as "last sent", without sending. The first send waits until something changes, following rev 7 §7.2's "only when state changed". Clients see the new `e` with that send.
 - **Unloading.** When its Room unloads, the RoomManager first runs the Broadcaster's last `broadcastState()` through the Room's queue, as the Room's final read. Then it closes the Room as in 2a, and sends that last snapshot (with any carried keys) in the background. The unload doesn't wait for the send. Inputs for the channel go to a freshly loaded Room, as 2a's retry on a closed Room already does. The last send keeps trying, through the pacing gate, for up to 30 s, and a new Broadcaster's sends queue behind it on the same gate. If it still fails, the gate records that keys were dropped, and the channel's next Broadcaster sends `rf` first.
 - **Accepted: a known gap.** If the Room never loads again in this process, nothing sends that `rf`. The affected viewers keep their last state until they reopen the extension, which fetches `/ext/view`. Rooms unload only with no session open and no running timers, so the gap covers one missed change to a state that isn't changing.
 
@@ -238,6 +240,8 @@ The snapshot is serialized and measured in bytes. Over 5 KB, in this order:
 1. Trim `p` to the first members by join order that fit, and add `pt`.
 2. If it still doesn't fit with `p` empty, replace `ch` with `rf: true`.
 3. If it still doesn't fit (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it.
+
+In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that gets it keeps its current roster, and takes the public state (phase, fight, party, adventure) from the `/ext/view` fetch that `rf` already asks for. Every field other than `v`, `e`, `t`, `rw` and `cv` is optional in the format, and absence means "not in this snapshot", never null.
 
 ### 5.5 The refresh window
 
@@ -260,7 +264,7 @@ Any valid JWT is enough for these routes, unless the table says otherwise. The c
 | `POST /ext/commands` | Body `{ id, command }`, as 2a §4.1, for viewer commands only (identity required). The answer adds `view`, the caller's own view after the command (rev 7 §7.3), and `key`, on success and on engine rejections. On a repeated request ID for an accepted command that changed state (the only kind 2a §4.1 stores), `ok`, `events` and `result` are replayed from storage, but `view` and `key` are computed fresh, so they're current after a restart. Other requests simply run again, as in 2a. |
 | `GET /ext/describe` | The channel's content catalog, as 2a's `describe`. |
 | `GET /ext/roster` | `{ rv, members: [[key, id, name, class, level]] }` for the party, in join order. |
-| `GET /ext/party` | `{ members: [{ id, name, class, level, hp, maxHp, knockedOut, statuses }] }`, the whole party, for the target picker (rev 7 §9). |
+| `GET /ext/party` | `{ members: [{ key, id, name, class, level, hp, maxHp, knockedOut, statuses }] }`, the whole party, for the target picker (rev 7 §9). |
 
 `events` in a `/ext/commands` answer are filtered by 2a's audience rule, as for any viewer.
 
@@ -344,7 +348,7 @@ Fly's `kill_timeout` is 30 s.
 - **`release_command`** runs `dndm server migrate` on a temporary machine before each deploy.
 - **`strategy = "rolling"`.** With one machine, it stops the old one before starting the new one, so two servers never fight over the lock. `bluegreen` and `canary` must not be used. The plan confirms this behavior against Fly's documentation. If two machines ever do overlap, the new server refuses to start while the old one holds the lock (2a §6.6), and Fly starts it again.
 - **The health check** is `GET /health`.
-- **The app name** has a random suffix (Twitch policy 2.13 wants hosted domains to carry a unique identifier). A custom domain can come later.
+- **The app name** has a random suffix (Twitch policy 2.13: "Public hosted domains should have a unique identifier or the url must be on a private domain"). A custom domain can come later, and it must meet the same rule: it is a domain this project owns (a private domain), or it carries a unique identifier.
 
 A deploy means a few seconds of downtime for every channel. Clients reconnect and get the full picture again (2a §5); the extension catches up from `/ext/view` and the next snapshot.
 
@@ -409,7 +413,8 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - at most one send per second;
   - no send when nothing changed;
   - failed sends and 429s keep their keys;
-  - a first snapshot has `rf` at boot and after dropped keys, and not on an ordinary load; `e` is new with every Broadcaster;
+  - a first snapshot has `rf` at boot and after dropped keys, and is sent at once; on an ordinary load nothing is sent until something changes; `e` is new with every Broadcaster;
+  - the bare fallback omits `ph`, `adv`, `f`, `p` and `rv`, and `/ext/roster` and `/ext/describe` are served from a cache;
   - a replayed `/ext/commands` request gets a fresh `view` and `key`;
   - a public change (monster HP, an overlay tally) puts nobody in `changed`;
   - `rv` bumps on roster changes only;
