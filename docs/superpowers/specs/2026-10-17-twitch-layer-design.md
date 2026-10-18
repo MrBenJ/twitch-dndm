@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 8)
+**Status:** Draft for owner review (revision 9)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -83,7 +83,8 @@ The Room, RoomManager and Hub keep their 2a jobs. The Room gains the two small a
 - 2a's viewer role row (§4.3) said the extension JWT would be used in 2b. The JWT is used only on the `/ext` routes (§4.1). On the 2a `/channels/:channel/*` routes, the viewer role stays dev login only.
 - Rev 7 §1.2 said "Any streamer can sign up". 2b's default is invite-only through the allowlist (§4.3), and `DNDM_SIGNUP=open` restores open sign-up.
 - 2a §1.2 and the engine spec put media uploads, the optional chat bot and the paid-pack "official" redefinition in Project 2. Media uploads move to Project 3, the chat bot (with chat bans) becomes its own project after Project 3, and the paid-pack redefinition waits for the first paid pack (§1.2, §11.2). Until media uploads exist, monster images stay as pack content provides them (or none).
-- Rev 7 §7.2 said every own-state change "always produces a snapshot". 2b accepts one exception (§5.3, "a known gap"). A change that was pending when a Room unloaded, or at shutdown, and whose send failed, may never reach viewers. This happens only if that Room doesn't load again in the process. Those viewers catch up when they reopen the extension.
+- Rev 7 §7.2 said every own-state change "always produces a snapshot". 2b accepts one exception (§5.3, "a known gap"). A change that was pending when a Room unloaded, at shutdown, or at a crash, and whose send never succeeded, reaches viewers only when that channel's Room next loads (its first send is an `rf`, §5.3). Until then, those viewers catch up when they reopen the extension.
+- The engine spec (§5.1) said "Signed paid packs come later". 2b's direction (§11.2) is that no signing is needed while packs only come from the official build.
 - 2a left 2b to decide what "watched" means. **Twitch viewers are never watched.** A Twitch viewer's character stays loaded through every other rule in 2a §6.2's "Staying loaded" list: party membership, a running timer, being marked "removed by the streamer" while a session is open with `streamerRemovalWaitsForRest` on, and being "part of an input or a view read in the last 10 minutes". Dev viewers are watched while their WebSocket is open, as in 2a.
 
 ## 3. Data
@@ -133,24 +134,24 @@ Sign-up is only available when Twitch is configured (§7.2).
    - Revokes the user token (best effort) and keeps nothing from it.
 4. **The allowlist.** If `DNDM_SIGNUP` is `allowlist` (the default) and the user's Twitch ID isn't on the allowlist, they see "The game isn't open for sign-ups yet." `DNDM_SIGNUP=open` skips this check.
 5. **The channel.** If no channel has this `twitch_id`, one is created through 2a's `createChannel`, with the default config and the display name as its `name`. Otherwise the existing channel is used.
-6. **The session.** The server sets a `dndm_session` cookie and redirects to `/setup`.
+6. **The sign-in session.** The server sets a `dndm_session` cookie and redirects to `/setup`. (A *sign-in session* is this login cookie; it's unrelated to the game session in 2a's `rooms.session`.)
    - The cookie is signed with a key derived from `DNDM_SECRET`, under its own label.
    - It holds the channel ID, the Twitch ID and an expiry 7 days away.
    - It is `HttpOnly`, `Secure` and `SameSite=Lax`.
-   - Sessions aren't stored, so a session can't be revoked early. Signing out clears the cookie.
+   - Sign-in sessions aren't stored, so one can't be revoked early. Signing out clears the cookie.
 
 Taking someone off the allowlist stops new sign-ins only. Their channel, sessions and URLs keep working, and a regenerate from their own `/setup` or dock only gives them new URLs. Cutting a channel off (ending its URLs and sessions) is out of scope, like channel deletion (§1.2).
 
 ### 4.4 The setup page
 
-`GET /setup` needs a valid session, and otherwise redirects to `/signup`. It shows:
+`GET /setup` needs a valid sign-in session, and otherwise redirects to `/signup`. It shows:
 
 - **the dock URL** `<DNDM_PUBLIC_URL>/dock#<dock token>` and **the overlay URL** `<DNDM_PUBLIC_URL>/overlay#<overlay token>`. The token sits in the URL fragment, so it never reaches server logs. Project 3 builds these screens; until then those two paths answer a short "coming in Project 3" page;
 - the `dndm connect` line for the dock, so the channel can be driven from the CLI now;
 - a link to install the extension;
 - **Regenerate** buttons for each URL, and **Sign out**.
 
-The buttons are POST forms carrying a CSRF token tied to the session. A regenerate runs as the Room's existing `regenerateDockUrl` or `regenerateOverlayUrl` server command, sent as the dock. It behaves exactly as in 2a: the old token stops working and its open WebSockets close.
+The buttons are POST forms carrying a CSRF token tied to the sign-in session. A regenerate runs as the Room's existing `regenerateDockUrl` or `regenerateOverlayUrl` server command, sent as the dock. It behaves exactly as in 2a: the old token stops working and its open WebSockets close.
 
 ### 4.5 Allowlist commands
 
@@ -168,8 +169,8 @@ One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Sho
 
 ```json
 { "v": 1, "e": "q7Lw2k", "t": 1792287427123,
-  "ph": "fight", "adv": { "id": "starter:crypt", "lined": null },
-  "f": { "n": "Goblin King", "img": null, "hp": 140, "mx": 200, "st": ["starter:stunned"],
+  "ph": "fight", "adv": { "id": "starter:the-cave", "lined": null },
+  "f": { "n": "Goblin King", "img": null, "hp": 140, "mx": 200, "st": ["starter:drowsy"],
          "sub": "f", "held": false, "nt": 1792287431000 },
   "p": [["k3Fq9xTz0a", "starter:fighter", 80, 0], ["Wm2bLp7cQe", "starter:healer", 0, 1]],
   "rv": 7, "ch": ["k3Fq9xTz0a"], "rw": 1000, "cv": 3 }
@@ -196,6 +197,7 @@ One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Sho
 - **Party statuses aren't in the snapshot.** Statuses come from packs, so they can't be fixed flag bits. A party member's statuses come from `/ext/party` (§5.6). This replaces rev 7's `statusFlags`.
 - **Never in a snapshot:** events, encounter panels (per-viewer widgets such as a shop) and overlay scenes. Viewers see encounter content through their own state (§5.6).
 - **Accepted: what a snapshot does reveal.** `ph` shows that an encounter is running, even a restricted one. `ch` lists the keys of viewers whose own state changed, without saying what changed.
+- **Accepted: the visible effects of what a party member does are public**, inside a restricted encounter too. A member who equips or uses something bought in a secret shop changes their `p` entry (class, `hpPercent`), the roster (`rv`) and `/ext/party`, like any other party state. Criterion 3 protects the shop's content (goods, prices, the purchase itself), not the visible effects of using what was bought afterwards.
 - **Accepted: party members' identities are public.** The party is public anyway (the overlay shows names, and a Twitch name resolves to a user ID). So `/ext/roster` and `/ext/party` give any JWT holder each party member's character ID (`twitch:<user_id>`) and key. Keys protect only viewers who have never been in the party. Once someone has been in the party, their key stays linkable to them for as long as it's stable. Neither shows an encounter's content.
 
 ### 5.2 Room additions
@@ -211,7 +213,7 @@ These are the only changes to the Room. 2a said 2b wouldn't change the Room (acc
    - **The comparison view** keeps only the per-character parts of `engine.view(game, id, now)`, matching rev 7 §7.3's "own state": `character` (which holds `stats`, statuses, gear and inventory), `panel`, and `abilities`, with each ability's `ready`, `reason` and `targets` removed. The view has no other top-level fields.
      - The public parts (`phase`, `fight`, `party`, `adventure`, `overlay`) are left out. Each either reaches viewers through the snapshot (`ph`, `f`, `p`, `adv`), or isn't needed live by the extension. The overlay scene is shown on the stream itself. Party detail is fetched when the extension needs it: names, classes and levels from `/ext/roster` when `rv` or `e` changes, and exact HP and statuses from `/ext/party` only when the target picker opens (rev 7 §9). A `/ext/party` fetch is one viewer's action, limited by the viewer rate limit (§4.1). A public change such as a vote tally on the overlay or a monster's HP therefore puts nobody in `changed`.
      - `targets` is left out because it follows the party, which is public. Clients pick ally targets from `/ext/party` (rev 7 §9).
-     - `ready` and `reason` change with time alone, as a cooldown runs out, and clients work them out from `readyAt` (rev 7 §7.3: "Cooldown countdowns are computed in the browser from end times").
+     - An ability's `ready` and `reason` are compared **as if its cooldown had ended**: a cooldown running out changes nothing in the comparison, and clients work cooldowns out from `readyAt` (rev 7 §7.3: "Cooldown countdowns are computed in the browser from end times"). Every other cause of readiness still counts: party membership, a knockout, a fight starting or ending (an ability's `when`), and `canUse`. A fight starting therefore puts every party member whose readiness flips into `changed`.
      - Every remaining field changes only through an input, a timer, or a load.
    - **When views are recorded.** In a Room with a Broadcaster, the Room records a character's comparison view at the moment it loads them, both when the Room itself loads and when it loads one character, before any command runs. So loading a character never makes them "changed" on its own, but a command that loads and changes a character does. It doesn't count as activity, so it never keeps a Room loaded or delays an unload. It also returns `inputs`, a counter the Room raises by one for every input that saved state (a command, a timer, a config change), and also exposes as a plain property (§5.3), so the Broadcaster can tell whether anything happened without queueing a read.
 2. **Dropping waits for the broadcast, in Rooms with a Broadcaster only.** In such a Room, the memory sweep (2a §6.2) doesn't drop a character whose current comparison view differs from their recorded one. They'll be in the next changed list, and can be dropped at a later sweep. A dropped character's recorded view is discarded with them. In a Room without a Broadcaster, nothing is recorded, and the sweep is exactly 2a's.
@@ -222,16 +224,21 @@ Party entries in the engine's view gain `level` and `statuses` (the same shape a
 
 The RoomManager starts a Broadcaster for every loaded Room whose channel has a `twitch_id`, when Twitch is configured. It starts it as part of loading the Room, before the Room takes any input. The Broadcaster's first act is a `broadcastState()`, the first entry in the Room's queue. It records that result as "last sent" without sending, so every later change is measured against the state as loaded. The Broadcaster doesn't subscribe to the Room's output, so it doesn't count as a listener and never keeps a Room loaded.
 
-- **The tick.** Every second on the server clock, it calls `broadcastState()` if the Room's `inputs` counter moved since the last call, if there are carried keys, or if a first `rf` is due (below). The Room exposes `inputs` as a plain property the Broadcaster reads directly, outside the queue. `broadcastState()` returns it too, so each result carries the counter it matches.
+- **The tick.** Every second on the server clock, it calls `broadcastState()` if the Room's `inputs` counter moved since the last call, if there are carried keys, or if an `rf` is due (below). The Room exposes `inputs` as a plain property the Broadcaster reads directly, outside the queue. `broadcastState()` returns it too, so each result carries the counter it matches.
 - **Pacing is per channel.** The spacing (at most one send a second), a 429 wait and the failure backoff (§8) live in the Twitch client, keyed by the channel's Twitch ID. They outlive any one Broadcaster, so a Room that unloads and reloads quickly still keeps to them. Every send waits on this gate, including a first tick and a last tick.
 - **What it sends.** A snapshot is sent when its content (everything but `t` and `rw`) differs from the last one sent, or its changed list isn't empty. Otherwise nothing is sent.
 - **Config changes.** The snapshot carries `cv`, the channel's `config_version`. A config change moves it, so the next tick sends a snapshot. This stands in for 2a's `config-changed` message on the viewer path.
 - **Keys are kept until delivered.** The changed list is every key from `broadcastState()` since the last successful send. A failed send keeps its keys for the next one.
 - **The roster version.** The Broadcaster keeps the roster it last computed: each party member's ID, name, class and level, in join order, taken from the public view's party entries. `rv` goes up by one whenever the newly computed roster differs from it. It starts at 1 when a Broadcaster starts. Clients refetch the roster when `rv` or `e` is different from what they hold, after a random delay in `[0, rw]`. Because `e` is new with every Broadcaster, a lost update before a restart can't leave a client holding a roster with a matching `rv`.
 - **Shared reads are cached.** `/ext/roster`, `/ext/describe` and the public view that `/ext/view` gives viewers without identity are the same for every viewer of a channel. The server builds each one once, per (`e`, `rv`), per `cv`, or per Room `inputs` value, and serves that copy to every viewer. These audience-wide fetches are spread by `rw`, but they aren't counted in §5.5's own-state target, because each costs a cache lookup, not a Room read.
-- **The first snapshot.** A Broadcaster's first send has `rf: true` in two cases. One is when it started during boot (§7.4), because changes may have been lost across the restart; it sends on its first tick. The other is when the channel's pacing gate records dropped keys. That can happen before this Broadcaster started, or later, while it runs: an earlier Broadcaster's last send can fail within its 30 s retry. Either way, the channel's current Broadcaster makes its next send an `rf`. If there is none, the next one to start does. In every other case, the first send is an ordinary one, made once something changes after the load (rev 7 §7.2's "only when state changed"). A command that loaded the Room and changed state is such a change, because the baseline was recorded before it ran. Clients see the new `e` with that first send.
+- **When a send is an `rf`.** A Broadcaster's next send is an `rf` whenever one of these is due:
+  - **It's the first Broadcaster for this channel since the process started**, whether at boot or on a later on-demand load. Changes may have been lost across a restart or a crash. This send goes out on its first tick.
+  - **The channel's pacing gate has recorded dropped keys.** That can happen before this Broadcaster started, or later, while it runs: an earlier Broadcaster's last send can fail within its 30 s retry. If no Broadcaster is running for the channel, the next one to start makes the `rf`.
+  - **The config changed** (`cv` moved, §5.1). A config change can alter every character's own state, loaded or not, so every viewer refetches.
+
+  Otherwise, a Broadcaster's first send is an ordinary one, made once something changes after the load (rev 7 §7.2's "only when state changed"). A command that loaded the Room and changed state is such a change, because the baseline was recorded before it ran. Clients see the new `e` with that first send.
 - **Unloading.** When its Room unloads, the RoomManager first runs the Broadcaster's last `broadcastState()` through the Room's queue, as the Room's final read. Then it closes the Room as in 2a, and sends that last snapshot (with any carried keys) in the background. The unload doesn't wait for the send. Inputs for the channel go to a freshly loaded Room, as 2a's retry on a closed Room already does. The last send keeps trying, through the pacing gate, for up to 30 s, and a new Broadcaster's sends queue behind it on the same gate. If it still fails, the gate records that keys were dropped, and the first-snapshot rule below applies.
-- **Accepted: a known gap.** If the Room never loads again in this process, nothing sends that `rf`. The affected viewers keep their last state until they reopen the extension, which fetches `/ext/view`. Rooms unload only with no session open and no running timers, so the gap covers one missed change to a state that isn't changing.
+- **Accepted: a known gap.** Until the channel's Room loads again, nothing sends that `rf`. The affected viewers keep their last state until they reopen the extension, which fetches `/ext/view`. Rooms unload only with no game session open and no running timers, so the gap covers one missed change to a state that isn't changing. When the Room next loads (in this process, or after a restart or crash), its `rf` closes the gap.
 
 ### 5.4 Size
 
@@ -248,11 +255,11 @@ In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that get
 `rw` tells clients how long to spread their own-state fetches. Each viewer picks a random delay in `[0, rw]`.
 
 - With a changed list, `rw` is the number of keys × 10 ms, at least 1,000 ms and at most 30,000 ms.
-- With `rf`, `rw` is always 30,000 ms. `rf` is rare: at boot, after dropped keys, or when the changed list doesn't fit (§5.4). Every viewer with identity fetches, and the server can't count them, so it uses the longest window.
+- With `rf`, `rw` is always 30,000 ms. `rf` is rare: a channel's first Broadcaster after a restart, dropped keys, a config change, or a changed list that doesn't fit (§5.4). Every viewer with identity fetches, and the server can't count them, so it uses the longest window.
 
 The server sets it, so it can be tuned without an extension update.
 
-**A known load risk.** A long changed list or `rf` comes from changes that touch many viewers' own state at once: an encounter starting or ending (every member's panel changes), a fight's rewards, or a pack whose panel shows shared state. The comparison view (§5.2) keeps public changes, such as an overlay tally or monster HP, out of `changed`. The **target** is about 100 own-state requests per second per channel (fetching viewers ÷ window). It's met while the fetching viewers number up to about 3,000. Beyond that, the 30 s cap wins and the rate rises above the target; this is a known limit, not a guarantee. The constants live in one place, so they can be tuned.
+**A known load risk.** A long changed list or `rf` comes from changes that touch many viewers' own state at once: an encounter starting or ending (every member's panel changes), a fight starting or ending (abilities' readiness flips), a fight's rewards, a config change (`rf`), or a pack whose panel shows shared state. The comparison view (§5.2) keeps public changes, such as an overlay tally or monster HP, out of `changed`. The **target** is about 100 own-state requests per second per channel (fetching viewers ÷ window). It's met while the fetching viewers number up to about 3,000. Beyond that, the 30 s cap wins and the rate rises above the target; this is a known limit, not a guarantee. The constants live in one place, so they can be tuned.
 
 ### 5.6 `/ext` routes
 
@@ -304,7 +311,7 @@ Used only by sign-up (§4.3):
 - A two-stage `Dockerfile` on `node:24-slim`:
   - `pnpm install --frozen-lockfile`;
   - it runs as a non-root user;
-  - it starts with `dndm server start --host 0.0.0.0 --port 8080`, through `tsx`, as locally.
+  - it starts with `dndm server start --host 0.0.0.0 --port 8080` (`--host` already exists in the 2a CLI, though 2a §8.1 doesn't list it), through `tsx`, as locally.
 - Official packs are the repository's `packs/` folder copied into the image.
 - CI builds the image on every push.
 
@@ -335,7 +342,7 @@ On SIGTERM, the server:
 
 1. stops accepting requests;
 2. waits up to 15 s for every Room's queue to finish (`manager.idle()`, which fixes 2a's deferred minor);
-3. runs each Broadcaster's last tick through the pacing gate, waiting up to 10 s more. Sends still waiting then are abandoned; the next boot's first snapshots carry `rf` (§5.3) for the Rooms loaded at boot, and the gap in §5.3 applies to the others. Shutdown is not an unload, so §5.3's 30 s background retry doesn't apply. Steps 2 and 3 together fit inside Fly's 30 s `kill_timeout`;
+3. runs each Broadcaster's last tick through the pacing gate, waiting up to 10 s more. Sends still waiting then are abandoned. After the restart, each channel's first Broadcaster sends an `rf` (§5.3), which closes the gap whenever the Room loads. Shutdown is not an unload, so §5.3's 30 s background retry doesn't apply. Steps 2 and 3 together fit inside Fly's 30 s `kill_timeout`;
 4. closes the Store, which releases the lock.
 
 Fly's `kill_timeout` is 30 s.
@@ -418,7 +425,9 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - a replayed `/ext/commands` request gets a fresh `view` and `key`;
   - a public change (monster HP, an overlay tally) puts nobody in `changed`;
   - `rv` bumps on roster changes only;
-  - a config change moves `cv` and sends a snapshot;
+  - a config change moves `cv` and sends an `rf`;
+  - a fight starting puts members whose readiness flips in `changed`, and a cooldown ending alone doesn't;
+  - the first Broadcaster for a channel after a restart sends `rf`, at boot or on a later load;
   - the unload's last `broadcastState()` runs before the Room closes;
   - trimming and the `rf` fallbacks at 5 KB (§5.4);
   - the `rw` values;
