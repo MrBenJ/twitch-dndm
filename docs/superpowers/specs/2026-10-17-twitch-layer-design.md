@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 2)
+**Status:** Draft for owner review (revision 3)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -23,7 +23,7 @@
 3. No snapshot ever contains an event, an encounter panel or an overlay scene, so the content of a restricted encounter (a secret shop's goods, prices and purchases) can't leak through the broadcast. A snapshot may still show that an encounter is running (`ph`) and which viewers' own state changed (`ch`); this is accepted (§5.1).
 4. A streamer on the allowlist can sign in with Twitch, gets a channel, and sees the dock and overlay URLs. A streamer not on the allowlist is turned away.
 5. The live check (§10) passes on the deployed server.
-6. Without any Twitch settings, the server behaves exactly as in 2a, and every 2a test still passes.
+6. Without any Twitch settings, every 2a route and rule behaves as in 2a, and every 2a test still passes. Three changes apply whatever the config: party entries in views gain `level` and `statuses` (§5.2), `GET /health` exists (§7.3), and shutdown waits for in-flight inputs (§7.4).
 
 ### 1.2 Out of scope
 
@@ -31,7 +31,7 @@
 - **The chat bot and chat bans** become their own small project after Project 3.
 - **Paid packs and the meaning of "official" for them** wait until a paid pack exists. §11.2 records the direction decided here.
 - **Screens.** The extension, dock and overlay are Project 3.
-- **Channel deletion**, admin commands from the sign-up page (rev 7 §8), and a waitlist for sign-up.
+- **Channel deletion**, admin commands from the sign-up page other than regenerating the dock and overlay URLs (rev 7 §8; regenerate is in scope, §4.4), and a waitlist for sign-up.
 
 ### 1.3 Decisions from the brainstorm
 
@@ -167,8 +167,8 @@ One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Sho
   "ph": "fight", "adv": { "id": "starter:crypt", "lined": null },
   "f": { "n": "Goblin King", "img": null, "hp": 140, "mx": 200, "st": ["starter:stunned"],
          "sub": "f", "held": false, "nt": 1792287431000 },
-  "p": [["12345", "starter:fighter", 80, 0], ["67890", "starter:healer", 0, 1]],
-  "rv": 7, "ch": ["12345"], "rw": 1000 }
+  "p": [["k3Fq9xTz0a", "starter:fighter", 80, 0], ["Wm2bLp7cQe", "starter:healer", 0, 1]],
+  "rv": 7, "ch": ["k3Fq9xTz0a"], "rw": 1000 }
 ```
 
 | Field | Meaning |
@@ -185,21 +185,25 @@ One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Sho
 | `rf` | `true` in place of `ch` when every viewer should fetch their own state. |
 | `rw` | Refresh window in ms (§5.5). |
 
-- **A key** is the character ID without its `twitch:` prefix, used only inside snapshots to save bytes. A character with any other prefix (a `dev:` character, only on a dev server) is sent with its full ID. Every HTTP route, commands included, uses full character IDs; the extension turns a key back into an ID by adding `twitch:`.
+- **A key** is an opaque per-channel name for a character, used only inside snapshots: the first 10 characters of base64url(HMAC-SHA256(k, channel ID + ":" + character ID)), where k is derived from `DNDM_SECRET` under its own label. Keys keep Twitch user IDs out of the broadcast, are the same length for every character (`dev:` ones included), and stay stable for a channel while `DNDM_SECRET` does.
+- **A viewer learns their own key** from the `key` field in `/ext/view` and `/ext/commands` answers. Other party members' keys map to IDs and names through `/ext/roster` (§5.6). Every HTTP route, commands included, uses full character IDs.
 - **Party statuses aren't in the snapshot.** Statuses come from packs, so they can't be fixed flag bits. A party member's statuses come from `/ext/party` (§5.6). This replaces rev 7's `statusFlags`.
 - **Never in a snapshot:** events, encounter panels (per-viewer widgets such as a shop) and overlay scenes. Viewers see encounter content through their own state (§5.6).
-- **Accepted: what a snapshot does reveal during a restricted encounter.** `ph` shows that an encounter is running. `ch` lists the keys (opaque Twitch user IDs) of viewers whose own state changed, without saying what changed. Neither shows the encounter's content.
+- **Accepted: what a snapshot does reveal during a restricted encounter.** `ph` shows that an encounter is running. `ch` lists the opaque keys of viewers whose own state changed, without saying what changed. A party member's key can be matched to their name through the roster, as the party is public anyway (the overlay shows it). A key outside the party can't be matched to anyone by other viewers. Neither shows the encounter's content.
 
 ### 5.2 Room additions
 
-These are the only changes to the Room. 2a said 2b wouldn't change the Room; both are additive and leave its queue, saving and memory rules as they are.
+These are the only changes to the Room. 2a said 2b wouldn't change the Room (accepted, §2.2). Item 1 adds a read to the queue, and item 2 changes the memory sweep in Rooms that have a Broadcaster. Saving is untouched, and so is everything in Rooms without a Broadcaster.
 
 1. **`room.broadcastState()`**, a read that runs through the Room's queue. It returns:
    - `publicView`;
-   - `changed`: the IDs of every loaded character whose own view (`engine.view(game, id, now)`) differs from the one recorded at the previous `broadcastState()`, in or out of the party. A character with no recorded view (newly loaded) counts as changed.
+   - `changed`: the IDs of every loaded character whose **comparison view** differs from the one recorded for them, in or out of the party.
 
-   It then records the current views. It doesn't count as activity, so it never keeps a Room loaded or delays an unload. It also returns `inputs`, a counter the Room raises by one for every input that saved state (a command, a timer, a config change), so the Broadcaster can tell whether anything happened.
-2. **Dropping waits for the broadcast, in Rooms with a Broadcaster only.** In such a Room, the memory sweep (2a §6.2) doesn't drop a character who has a recorded view that differs from their current view. They'll be in the next changed list, and can be dropped at a later sweep. A character with no recorded view is treated as unchanged by the sweep. A newly loaded character was part of an input or a view read when they loaded, so 2a's 10-minute rule keeps them loaded well past the next broadcast. In a Room without a Broadcaster, the sweep is exactly 2a's.
+   It then records the current comparison views.
+
+   - **The comparison view** is `engine.view(game, id, now)` with each ability's `ready` and `reason` removed. Those two fields change with time alone, as a cooldown runs out, and clients work them out from `readyAt` (rev 7 §7.3: "Cooldown countdowns are computed in the browser from end times"). Every other view field changes only through an input, a timer, or a load.
+   - **When views are recorded.** In a Room with a Broadcaster, the Room records a character's comparison view at the moment it loads them, both when the Room itself loads and when it loads one character, before any command runs. So loading a character never makes them "changed" on its own, but a command that loads and changes a character does. It doesn't count as activity, so it never keeps a Room loaded or delays an unload. It also returns `inputs`, a counter the Room raises by one for every input that saved state (a command, a timer, a config change), so the Broadcaster can tell whether anything happened.
+2. **Dropping waits for the broadcast, in Rooms with a Broadcaster only.** In such a Room, the memory sweep (2a §6.2) doesn't drop a character whose current comparison view differs from their recorded one. They'll be in the next changed list, and can be dropped at a later sweep. A dropped character's recorded view is discarded with them. In a Room without a Broadcaster, nothing is recorded, and the sweep is exactly 2a's.
 
 Party entries in the engine's view gain `level` and `statuses` (the same shape as `character.statuses`), an additive change to `engine.view` used by the roster and `/ext/party`.
 
@@ -208,11 +212,12 @@ Party entries in the engine's view gain `level` and `statuses` (the same shape a
 The RoomManager starts a Broadcaster for every loaded Room whose channel has a `twitch_id`, when Twitch is configured. It doesn't subscribe to the Room's output, so it doesn't count as a listener and never keeps a Room loaded.
 
 - **The tick.** Every second on the server clock, it calls `broadcastState()` if this is its first tick, if the Room's `inputs` counter moved since the last tick, or if there are carried keys.
+- **Pacing is per channel.** The spacing (at most one send a second), a 429 wait and the failure backoff (§8) live in the Twitch client, keyed by the channel's Twitch ID. They outlive any one Broadcaster, so a Room that unloads and reloads quickly still keeps to them. Every send waits on this gate, including a first tick and a last tick.
 - **What it sends.** A snapshot is sent when its content (everything but `t` and `rw`) differs from the last one sent, or its changed list isn't empty. Otherwise nothing is sent.
 - **Keys are kept until delivered.** The changed list is every key from `broadcastState()` since the last successful send. A failed send keeps its keys for the next one.
 - **The roster version.** The Broadcaster keeps the roster it last computed: each party member's ID, name, class and level, in join order, taken from the public view's party entries. `rv` goes up by one whenever the newly computed roster differs from it. It starts at 1 when a Broadcaster starts. Clients refetch the roster when `rv` is *different* from what they hold, not just higher, so a reset after a reload still works.
 - **The first snapshot** a Broadcaster sends has `rf: true`, which covers anything missed across a restart or an unload.
-- **Unloading.** Before its Room unloads, the RoomManager runs one last tick, so carried keys are sent before the Broadcaster stops.
+- **Unloading.** Before its Room unloads, the RoomManager runs one last tick, so carried keys are sent before the Broadcaster stops. The unload waits for that send, through the pacing gate, for up to 30 s. If the send still fails, the keys are dropped; the next Broadcaster's first snapshot has `rf`, which covers them.
 
 ### 5.4 Size
 
@@ -239,10 +244,10 @@ Any valid JWT is enough for these routes, unless the table says otherwise. The c
 
 | Route | Answer |
 |---|---|
-| `GET /ext/view` | With identity: the caller's own view, loading their character as a 2a view read does. Without: the public view. |
-| `POST /ext/commands` | Body `{ id, command }`, as 2a §4.1, for viewer commands only (identity required). The answer adds `view`, the caller's own view after the command (rev 7 §7.3), on success and on engine rejections. |
+| `GET /ext/view` | With identity: the caller's own view, loading their character as a 2a view read does, plus their `key` (§5.1). Without: the public view. |
+| `POST /ext/commands` | Body `{ id, command }`, as 2a §4.1, for viewer commands only (identity required). The answer adds `view`, the caller's own view after the command (rev 7 §7.3), and `key`, on success and on engine rejections. |
 | `GET /ext/describe` | The channel's content catalog, as 2a's `describe`. |
-| `GET /ext/roster` | `{ rv, members: [[id, name, class, level]] }` for the party, in join order. |
+| `GET /ext/roster` | `{ rv, members: [[key, id, name, class, level]] }` for the party, in join order. |
 | `GET /ext/party` | `{ members: [{ id, name, class, level, hp, maxHp, knockedOut, statuses }] }`, the whole party, for the target picker (rev 7 §9). |
 
 `events` in a `/ext/commands` answer are filtered by 2a's audience rule, as for any viewer.
@@ -266,7 +271,7 @@ Looks up users by ID (for display names) or by login (for the allowlist), using 
   - `channel_id`: the channel's Twitch ID;
   - `pubsub_perms`: `{ send: ["broadcast"] }`.
 - **The request** carries `Client-Id: TWITCH_CLIENT_ID`, with the body `{ target: ["broadcast"], broadcaster_id, message }`.
-- **Rate limits.** We send at most once a second per channel. A 429 waits until Twitch's rate-limit reset header before that channel's next send.
+- **Rate limits.** We send at most once a second per channel. A 429 waits until Twitch's rate-limit reset header before that channel's next send. Both are enforced by the per-channel pacing gate (§5.3).
 
 ### 6.4 OAuth
 
@@ -314,7 +319,7 @@ On SIGTERM, the server:
 
 1. stops accepting requests;
 2. waits for every Room's queue to finish (`manager.idle()`, which fixes 2a's deferred minor);
-3. runs each Broadcaster's last tick;
+3. runs each Broadcaster's last tick through the pacing gate. Sends still waiting when 20 s have passed are abandoned, and the next boot's first snapshots carry `rf`;
 4. closes the Store, which releases the lock.
 
 Fly's `kill_timeout` is 30 s.
