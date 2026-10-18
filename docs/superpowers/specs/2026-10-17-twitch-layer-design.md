@@ -390,6 +390,8 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
 - **Room additions:**
   - `changed` includes a loaded character with no open connection whose state changed, and excludes an unchanged one;
   - `broadcastState()` doesn't keep a Room loaded;
+  - loading a character (a view read) doesn't put them in `changed`, and a cooldown running out alone doesn't either;
+  - a viewer's `key` from `/ext/view` matches their entry in `p`, `ch` and `/ext/roster`;
   - the sweep doesn't drop a character with an unbroadcast change.
 - **Broadcaster**, with the FakeClock and the fake Twitch:
   - at most one send per second;
