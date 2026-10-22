@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 9)
+**Status:** Draft for owner review (revision 10)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -20,10 +20,10 @@
 
 1. A test viewer holding a JWT signed with the test extension secret can read their view, join, fight and see their state change, entirely through `/ext` routes and snapshots sent to a fake Twitch.
 2. Project 1's golden scripts, with viewer lines replayed through `/ext` as Twitch viewers (streamer lines through the dock routes) with signed JWTs and a fake clock, give the same events as `dndm run` with the same seed, apart from character ID prefixes (`twitch:` here). The test's fake Twitch answers Get Users for each script viewer with the name the script uses for them, so display names match too. This is 2a's criterion 2, carried to the real viewer path.
-3. No snapshot ever contains an event, an encounter panel or an overlay scene, so the content of a restricted encounter (a secret shop's goods, prices, and what anyone bought) can't leak through the broadcast. A snapshot may still show that an encounter is running (`ph`) and which viewers' own state changed (`ch`). For a party member, whose key the roster maps to their identity, `ch` during a secret shop shows that they did something there, usually a purchase, but not what. This is accepted (§5.1).
+3. No snapshot ever contains an event, an encounter panel or an overlay scene, so the content of a restricted encounter (a secret shop's goods, its prices, and the purchase itself) can't leak through the broadcast. This protects the content only. The visible effects of using what was bought (a party member's class or HP in `p`, the roster and `/ext/party`) are public like any other party state, even while the shop is still open (§5.1). A snapshot may still show that an encounter is running (`ph`) and which viewers' own state changed (`ch`). For a party member, whose key the roster maps to their identity, `ch` during a secret shop shows that they did something there, usually a purchase, but not what. This is accepted (§5.1).
 4. A streamer on the allowlist can sign in with Twitch, gets a channel, and sees the dock and overlay URLs. A streamer not on the allowlist is turned away.
 5. The live check (§10) passes on the deployed server.
-6. Without any Twitch settings, every 2a route and rule behaves as in 2a, and every 2a test still passes. Three changes apply whatever the config: party entries in views gain `level` and `statuses` (§5.2), `GET /health` exists (§7.3), and shutdown waits for in-flight inputs (§7.4).
+6. Without any Twitch settings, every 2a route and rule behaves as in 2a, and every 2a test still passes. Four changes apply whatever the config: party entries in views gain `level` and `statuses` (§5.2), reactions inside a restricted encounter take its audience (§5.7), `GET /health` exists (§7.3), and shutdown waits for in-flight inputs (§7.4).
 
 ### 1.2 Out of scope
 
@@ -79,7 +79,10 @@ The Room, RoomManager and Hub keep their 2a jobs. The Room gains the two small a
 
 **What this changes in 2a's spec.** The owner accepted these changes during the 2b design:
 
-- 2a said 2b would add the Twitch layer "without changing the Room". 2b makes the two additive Room changes in §5.2, and one additive change to `engine.view` (§5.2).
+- 2a said 2b would add the Twitch layer "without changing the Room". 2b makes the two additive Room changes in §5.2, one additive change to `engine.view` (§5.2), and one engine fix (§5.7).
+- 2a README decision 3 left reaction events inside a restricted encounter public, which 2a spec §7.2 didn't allow. 2b fixes the engine to match §7.2 (§5.7), and decision 3 no longer applies.
+- Rev 7 §7.2 sends a snapshot "only when state changed". The first Broadcaster for a channel since the process started always sends an `rf`, even when nothing changed, because changes may have been lost across a restart (§5.3).
+- On 2a's viewer path, a config change sends a `config-changed` message, and clients refetch after a random 0–1 s delay. On the Twitch path, a config change becomes an `rf` snapshot with `rw` = 30 s (§5.3, §5.5). The 2a `config-changed` message stays for dev viewers, the dock and the overlay.
 - 2a's viewer role row (§4.3) said the extension JWT would be used in 2b. The JWT is used only on the `/ext` routes (§4.1). On the 2a `/channels/:channel/*` routes, the viewer role stays dev login only.
 - Rev 7 §1.2 said "Any streamer can sign up". 2b's default is invite-only through the allowlist (§4.3), and `DNDM_SIGNUP=open` restores open sign-up.
 - 2a §1.2 and the engine spec put media uploads, the optional chat bot and the paid-pack "official" redefinition in Project 2. Media uploads move to Project 3, the chat bot (with chat bans) becomes its own project after Project 3, and the paid-pack redefinition waits for the first paid pack (§1.2, §11.2). Until media uploads exist, monster images stay as pack content provides them (or none).
@@ -202,7 +205,7 @@ One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Sho
 
 ### 5.2 Room additions
 
-These are the only changes to the Room. 2a said 2b wouldn't change the Room (accepted, §2.2). Item 1 adds a read to the queue, and item 2 changes the memory sweep in Rooms that have a Broadcaster. Saving is untouched. Rooms without a Broadcaster are untouched apart from the view change below, which applies to every Room.
+These are the only changes to the Room. 2a said 2b wouldn't change the Room (accepted, §2.2). Item 1 adds a read to the queue, and item 2 changes the memory sweep in Rooms that have a Broadcaster. Saving is untouched. Rooms without a Broadcaster are untouched apart from the view change below and the engine fix in §5.7, which apply to every Room.
 
 1. **`room.broadcastState()`**, a read that runs through the Room's queue. It returns:
    - `publicView`;
@@ -210,8 +213,8 @@ These are the only changes to the Room. 2a said 2b wouldn't change the Room (acc
 
    It then records the current comparison views.
 
-   - **The comparison view** keeps only the per-character parts of `engine.view(game, id, now)`, matching rev 7 §7.3's "own state": `character` (which holds `stats`, statuses, gear and inventory), `panel`, and `abilities`, with each ability's `ready`, `reason` and `targets` removed. The view has no other top-level fields.
-     - The public parts (`phase`, `fight`, `party`, `adventure`, `overlay`) are left out. Each either reaches viewers through the snapshot (`ph`, `f`, `p`, `adv`), or isn't needed live by the extension. The overlay scene is shown on the stream itself. Party detail is fetched when the extension needs it: names, classes and levels from `/ext/roster` when `rv` or `e` changes, and exact HP and statuses from `/ext/party` only when the target picker opens (rev 7 §9). A `/ext/party` fetch is one viewer's action, limited by the viewer rate limit (§4.1). A public change such as a vote tally on the overlay or a monster's HP therefore puts nobody in `changed`.
+   - **The comparison view** keeps only the per-character parts of `engine.view(game, id, now)`, matching rev 7 §7.3's "own state": `character` (which holds `stats`, statuses, gear and inventory), `panel`, and `abilities`, with each ability's `targets` removed and its `ready` and `reason` normalised as if its cooldown had ended (below). The view has no other top-level fields.
+     - The public parts (`phase`, `fight`, `party`, `adventure`, `overlay`) are left out. Each either reaches viewers through the snapshot (`ph`, `f`, `p`, `adv`), or isn't needed live by the extension. The overlay scene is shown on the stream itself. Party detail is fetched when the extension needs it: names, classes and levels from `/ext/roster` when `rv` or `e` changes, and exact HP and statuses from `/ext/party` only when the target picker opens (rev 7 §9). A `/ext/party` fetch is one viewer's action, limited by the viewer rate limit (§4.1). With the starter pack, a public change such as a vote tally on the overlay or a monster's HP therefore puts nobody in `changed`. This isn't true for every pack: a pack whose `canUse` or stat modifiers read shared state (a monster's HP, the party's size) makes a public change alter members' own state, and they land in `changed` (§5.5).
      - `targets` is left out because it follows the party, which is public. Clients pick ally targets from `/ext/party` (rev 7 §9).
      - An ability's `ready` and `reason` are compared **as if its cooldown had ended**: a cooldown running out changes nothing in the comparison, and clients work cooldowns out from `readyAt` (rev 7 §7.3: "Cooldown countdowns are computed in the browser from end times"). Every other cause of readiness still counts: party membership, a knockout, a fight starting or ending (an ability's `when`), and `canUse`. A fight starting therefore puts every party member whose readiness flips into `changed`.
      - Every remaining field changes only through an input, a timer, or a load.
@@ -259,7 +262,7 @@ In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that get
 
 The server sets it, so it can be tuned without an extension update.
 
-**A known load risk.** A long changed list or `rf` comes from changes that touch many viewers' own state at once: an encounter starting or ending (every member's panel changes), a fight starting or ending (abilities' readiness flips), a fight's rewards, a config change (`rf`), or a pack whose panel shows shared state. The comparison view (§5.2) keeps public changes, such as an overlay tally or monster HP, out of `changed`. The **target** is about 100 own-state requests per second per channel (fetching viewers ÷ window). It's met while the fetching viewers number up to about 3,000. Beyond that, the 30 s cap wins and the rate rises above the target; this is a known limit, not a guarantee. The constants live in one place, so they can be tuned.
+**A known load risk.** A long changed list or `rf` comes from changes that touch many viewers' own state at once: an encounter starting or ending (every member's panel changes), a fight starting or ending (abilities' readiness flips), a fight's rewards, a config change (`rf`), a pack whose panel shows shared state, or a pack whose `canUse` or stat modifiers read shared state. Otherwise the comparison view (§5.2) keeps public changes, such as an overlay tally or monster HP, out of `changed`. The **target** is about 100 own-state requests per second per channel (fetching viewers ÷ window). It's met while the fetching viewers number up to about 3,000. Beyond that, the 30 s cap wins and the rate rises above the target; this is a known limit, not a guarantee. The constants live in one place, so they can be tuned.
 
 ### 5.6 `/ext` routes
 
@@ -274,6 +277,19 @@ Any valid JWT is enough for these routes, unless the table says otherwise. The c
 | `GET /ext/party` | `{ members: [{ key, id, name, class, level, hp, maxHp, knockedOut, statuses }] }`, the whole party, for the target picker (rev 7 §9). |
 
 `events` in a `/ext/commands` answer are filtered by 2a's audience rule, as for any viewer.
+
+### 5.7 Reaction audiences (engine fix)
+
+2a spec §7.2 says every event produced while handling a restricted encounter gets its audience. As built (2a README decision 3), only events from the encounter's start, `respond`, wake-ups and end are stamped. Reactions run later, in `settle`, so their events stay public and reach the overlay's event feed. A reaction to a secret-shop purchase would show it on stream.
+
+2b fixes this in `packages/engine`:
+
+- A reaction queued while handling a restricted encounter (at one of those four points) carries the encounter's audience, worked out when it is queued.
+- Every event emitted while that reaction runs gets that audience, core events from `ctx` operations included, unless the emit sets its own audience.
+- Reactions it queues in turn carry the same audience, to any depth. The `core:reaction-limit` event for such a chain gets it too.
+- Reactions queued outside a restricted encounter stay public, as in 2a.
+
+The rule applies whatever the config (§1.1 criterion 6), because it lives in the engine.
 
 ## 6. The Twitch client
 
@@ -423,7 +439,7 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - a first send has `rf` at boot and after dropped keys, including keys dropped while a newer Broadcaster already runs; on an ordinary load nothing is sent until something changes, and a `join` that loaded the Room is sent; `e` is new with every Broadcaster;
   - the bare fallback omits `ph`, `adv`, `f`, `p` and `rv`, and `/ext/roster` and `/ext/describe` are served from a cache;
   - a replayed `/ext/commands` request gets a fresh `view` and `key`;
-  - a public change (monster HP, an overlay tally) puts nobody in `changed`;
+  - with the starter pack, a public change (monster HP, an overlay tally) puts nobody in `changed`; with a test pack whose `canUse` reads monster HP, a monster HP change puts the affected members in `changed`;
   - `rv` bumps on roster changes only;
   - a config change moves `cv` and sends an `rf`;
   - a fight starting puts members whose readiness flips in `changed`, and a cooldown ending alone doesn't;
@@ -432,7 +448,14 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - trimming and the `rf` fallbacks at 5 KB (§5.4);
   - the `rw` values;
   - the last tick on unload;
-  - **a secret shop's content never appears in any snapshot.**
+  - **a secret shop's content never appears in any snapshot**, while a member who equips a bought item mid-shop changes their `p` entry and `rv` (criterion 3);
+  - the first send after a restart is an `rf` even when nothing changed.
+- **Reaction audiences (engine, §5.7):**
+  - a reaction queued by a restricted encounter's `respond` gets its audience, and so does a reaction it queues;
+  - reactions queued by the encounter's start, a wake-up and its end get it too;
+  - an emit inside such a reaction that sets its own audience keeps it;
+  - a reaction queued outside a restricted encounter stays public;
+  - the Hub doesn't send such a reaction's events to the overlay, and `/ext/commands` answers show them only to the audience.
 - **Sign-up:**
   - an account not on the allowlist is turned away, and `open` mode lets it in;
   - the first sign-in creates a channel, and a second reaches the same one;
@@ -471,5 +494,5 @@ A real extension receiving the snapshot is checked in Project 3.
 
 ### 11.3 Open decisions carried from 2a
 
-- **Reaction events inside restricted encounters stay public** (2a README decision 3). In 2b, snapshots carry no events. Viewers get events only in their own `/ext/commands` answers, filtered by 2a's audience rule. This decision therefore affects the overlay's event feed, and the events in a viewer's own command answers.
+- **Reaction events inside restricted encounters** were public under 2a README decision 3. 2b resolves this by fixing the engine (§5.7).
 - **The 5-minute `replayRevoked` window** for regenerated tokens (2a §4.1) is unchanged.
