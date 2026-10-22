@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 10)
+**Status:** Draft for owner review (revision 11)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -20,7 +20,7 @@
 
 1. A test viewer holding a JWT signed with the test extension secret can read their view, join, fight and see their state change, entirely through `/ext` routes and snapshots sent to a fake Twitch.
 2. Project 1's golden scripts, with viewer lines replayed through `/ext` as Twitch viewers (streamer lines through the dock routes) with signed JWTs and a fake clock, give the same events as `dndm run` with the same seed, apart from character ID prefixes (`twitch:` here). The test's fake Twitch answers Get Users for each script viewer with the name the script uses for them, so display names match too. This is 2a's criterion 2, carried to the real viewer path.
-3. No snapshot ever contains an event, an encounter panel or an overlay scene, so the content of a restricted encounter (a secret shop's goods, its prices, and the purchase itself) can't leak through the broadcast. This protects the content only. The visible effects of using what was bought (a party member's class or HP in `p`, the roster and `/ext/party`) are public like any other party state, even while the shop is still open (§5.1). A snapshot may still show that an encounter is running (`ph`) and which viewers' own state changed (`ch`). For a party member, whose key the roster maps to their identity, `ch` during a secret shop shows that they did something there, usually a purchase, but not what. This is accepted (§5.1).
+3. No snapshot ever contains an event, an encounter panel or an overlay scene, so the content of a restricted encounter (a secret shop's goods, its prices, and what was bought) can't leak through the broadcast. This protects the content only: what was bought, not that a member did something in the shop. The visible effects of using what was bought (a party member's class or HP in `p`, the roster and `/ext/party`) are public like any other party state, even while the shop is still open (§5.1). A snapshot may still show that an encounter is running (`ph`) and which viewers' own state changed (`ch`). For a party member, whose key the roster maps to their identity, `ch` during a secret shop shows that they did something there, usually a purchase, but not what. This is accepted (§5.1).
 4. A streamer on the allowlist can sign in with Twitch, gets a channel, and sees the dock and overlay URLs. A streamer not on the allowlist is turned away.
 5. The live check (§10) passes on the deployed server.
 6. Without any Twitch settings, every 2a route and rule behaves as in 2a, and every 2a test still passes. Four changes apply whatever the config: party entries in views gain `level` and `statuses` (§5.2), reactions inside a restricted encounter take its audience (§5.7), `GET /health` exists (§7.3), and shutdown waits for in-flight inputs (§7.4).
@@ -133,7 +133,7 @@ Sign-up is only available when Twitch is configured (§7.2).
 3. **`GET /signup/callback`**:
    - Checks that `state` matches the cookie.
    - Exchanges the code for a user token.
-   - Reads the user's ID, login and display name with Get Users.
+   - Reads the user's ID, login and display name with Get Users, called with the user token and no ID or login, which returns the token's owner (§6.2).
    - Revokes the user token (best effort) and keeps nothing from it.
 4. **The allowlist.** If `DNDM_SIGNUP` is `allowlist` (the default) and the user's Twitch ID isn't on the allowlist, they see "The game isn't open for sign-ups yet." `DNDM_SIGNUP=open` skips this check.
 5. **The channel.** If no channel has this `twitch_id`, one is created through 2a's `createChannel`, with the default config and the display name as its `name`. Otherwise the existing channel is used.
@@ -200,7 +200,7 @@ One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Sho
 - **Party statuses aren't in the snapshot.** Statuses come from packs, so they can't be fixed flag bits. A party member's statuses come from `/ext/party` (§5.6). This replaces rev 7's `statusFlags`.
 - **Never in a snapshot:** events, encounter panels (per-viewer widgets such as a shop) and overlay scenes. Viewers see encounter content through their own state (§5.6).
 - **Accepted: what a snapshot does reveal.** `ph` shows that an encounter is running, even a restricted one. `ch` lists the keys of viewers whose own state changed, without saying what changed.
-- **Accepted: the visible effects of what a party member does are public**, inside a restricted encounter too. A member who equips or uses something bought in a secret shop changes their `p` entry (class, `hpPercent`), the roster (`rv`) and `/ext/party`, like any other party state. Criterion 3 protects the shop's content (goods, prices, the purchase itself), not the visible effects of using what was bought afterwards.
+- **Accepted: the visible effects of what a party member does are public**, inside a restricted encounter too. A member who equips or uses something bought in a secret shop changes their `p` entry (class, `hpPercent`), the roster (`rv`) and `/ext/party`, like any other party state. Criterion 3 protects the shop's content (goods, prices, and what was bought), not the visible effects of using what was bought afterwards.
 - **Accepted: party members' identities are public.** The party is public anyway (the overlay shows names, and a Twitch name resolves to a user ID). So `/ext/roster` and `/ext/party` give any JWT holder each party member's character ID (`twitch:<user_id>`) and key. Keys protect only viewers who have never been in the party. Once someone has been in the party, their key stays linkable to them for as long as it's stable. Neither shows an encounter's content.
 
 ### 5.2 Room additions
@@ -240,7 +240,7 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
   - **The config changed** (`cv` moved, §5.1). A config change can alter every character's own state, loaded or not, so every viewer refetches.
 
   Otherwise, a Broadcaster's first send is an ordinary one, made once something changes after the load (rev 7 §7.2's "only when state changed"). A command that loaded the Room and changed state is such a change, because the baseline was recorded before it ran. Clients see the new `e` with that first send.
-- **Unloading.** When its Room unloads, the RoomManager first runs the Broadcaster's last `broadcastState()` through the Room's queue, as the Room's final read. Then it closes the Room as in 2a, and sends that last snapshot (with any carried keys) in the background. The unload doesn't wait for the send. Inputs for the channel go to a freshly loaded Room, as 2a's retry on a closed Room already does. The last send keeps trying, through the pacing gate, for up to 30 s, and a new Broadcaster's sends queue behind it on the same gate. If it still fails, the gate records that keys were dropped, and the first-snapshot rule below applies.
+- **Unloading.** When its Room unloads, the RoomManager first runs the Broadcaster's last `broadcastState()` through the Room's queue, as the Room's final read. Then it closes the Room as in 2a, and sends that last snapshot (with any carried keys) in the background. The unload doesn't wait for the send. Inputs for the channel go to a freshly loaded Room, as 2a's retry on a closed Room already does. The last send keeps trying, through the pacing gate, for up to 30 s, and a new Broadcaster's sends queue behind it on the same gate. If it still fails, the gate records that keys were dropped, and the dropped-keys `rf` rule above applies.
 - **Accepted: a known gap.** Until the channel's Room loads again, nothing sends that `rf`. The affected viewers keep their last state until they reopen the extension, which fetches `/ext/view`. Rooms unload only with no game session open and no running timers, so the gap covers one missed change to a state that isn't changing. When the Room next loads (in this process, or after a restart or crash), its `rf` closes the gap.
 
 ### 5.4 Size
@@ -299,7 +299,10 @@ Comes from the client credentials grant (`TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECR
 
 ### 6.2 Get Users
 
-Looks up users by ID (for display names) or by login (for the allowlist), using the app token.
+Two modes:
+
+- **With the app token**, it looks up users by ID (for display names) or by login (for the allowlist).
+- **With a user token** and no ID or login, it returns that token's owner. Only sign-up uses this mode (§4.3, §6.4).
 
 ### 6.3 Send Extension PubSub Message
 
@@ -318,6 +321,7 @@ Used only by sign-up (§4.3):
 
 - the authorize URL, with no scopes;
 - the code exchange;
+- Get Users with the user token, to identify who signed in (§6.2);
 - token revocation.
 
 ## 7. Deploy and config
@@ -345,7 +349,7 @@ Used only by sign-up (§4.3):
 | `DNDM_SIGNUP` | no | `allowlist` (default) or `open`. |
 | `DNDM_DEV` | no | As in 2a. |
 
-- **"Twitch is configured"** means `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_EXTENSION_SECRET`, `TWITCH_OWNER_ID` and `DNDM_PUBLIC_URL` are all set. `TWITCH_EXTENSION_SECRET_PREVIOUS` is optional and isn't part of this check. With some but not all of them set, the server refuses to start and names what's missing. With none set, there are no `/ext`, `/signup`, `/setup`, `/dock` or `/overlay` routes and no Broadcasters, as in 2a (apart from the three changes in §1.1 criterion 6).
+- **"Twitch is configured"** means `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_EXTENSION_SECRET`, `TWITCH_OWNER_ID` and `DNDM_PUBLIC_URL` are all set. `TWITCH_EXTENSION_SECRET_PREVIOUS` is optional and isn't part of this check. With some but not all of them set, the server refuses to start and names what's missing. With none set, there are no `/ext`, `/signup`, `/setup`, `/dock` or `/overlay` routes and no Broadcasters, as in 2a (apart from the four changes in §1.1 criterion 6).
 - With Twitch configured and `DNDM_DEV=1`, the server starts and logs a warning on every boot.
 
 ### 7.3 `GET /health`
@@ -408,7 +412,7 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
 
 ## 9. Testing
 
-- **The fake Twitch** is a local Fastify app that plays the OAuth, token, Get Users and PubSub endpoints. It records every request and can be told to fail, time out or answer 429. The Twitch client takes its base URLs from config, and tests point them at the fake.
+- **The fake Twitch** is a local Fastify app that plays the OAuth, token, Get Users (by ID, by login, and a user token's owner) and PubSub endpoints. It records every request and can be told to fail, time out or answer 429. The Twitch client takes its base URLs from config, and tests point them at the fake.
 - **JWT:**
   - valid;
   - expired, and within leeway;
@@ -458,6 +462,7 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - the Hub doesn't send such a reaction's events to the overlay, and `/ext/commands` answers show them only to the audience.
 - **Sign-up:**
   - an account not on the allowlist is turned away, and `open` mode lets it in;
+  - the callback identifies the user with Get Users on the user token, then revokes it;
   - the first sign-in creates a channel, and a second reaches the same one;
   - a bad `state` is refused;
   - `/setup` without a session redirects;
