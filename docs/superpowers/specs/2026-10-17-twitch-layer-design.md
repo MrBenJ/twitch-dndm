@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 13)
+**Status:** Draft for owner review (revision 14)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -229,12 +229,13 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
 
 - **The tick.** Every second on the server clock, it calls `broadcastState()` if the Room's `inputs` counter moved since the last call, if there are carried keys, or if an `rf` is due (below). The Room exposes `inputs` as a plain property the Broadcaster reads directly, outside the queue. `broadcastState()` returns it too, so each result carries the counter it matches.
 - **Pacing is per channel.** The spacing (at most one send a second), a 429 wait and the failure backoff (§8) live in the Twitch client, keyed by the channel's Twitch ID. They outlive any one Broadcaster, so a Room that unloads and reloads quickly still keeps to them. Every send waits on this gate, including a first tick and a last tick.
-- **What it sends.** A snapshot is sent when its content (everything but `t` and `rw`) differs from the last one sent, or its changed list isn't empty. Otherwise nothing is sent.
+- **What it sends.** A snapshot is sent when its content (everything but `t` and `rw`) differs from the last one sent, or its changed list isn't empty, or an `rf` is due (below). A due `rf` is always sent, even when nothing changed. Otherwise nothing is sent.
 - **Config changes.** The snapshot carries `cv`, the channel's `config_version`. A config change moves it, so the next tick sends a snapshot. This stands in for 2a's `config-changed` message on the viewer path.
-- **Keys are kept until delivered.** The changed list is every key from `broadcastState()` since the last successful send. A failed send keeps its keys for the next one.
+- **Keys are kept until delivered.** The changed list is every key from `broadcastState()` since the last successful send that hasn't been delivered yet. A failed send keeps its keys for the next one, and so does a send that can't fit them all (§5.4).
+- **The backlog cap.** If more than 3,000 keys are waiting when a send is built (30 s at §5.5's target of 100 a second), that send is an `rf`, and the waiting keys are cleared once it succeeds.
 - **The roster version.** The Broadcaster keeps the roster it last computed: each party member's ID, name, class and level, in join order, taken from the public view's party entries. `rv` goes up by one whenever the newly computed roster differs from it. It starts at 1 when a Broadcaster starts. Clients refetch the roster when `rv` or `e` is different from what they hold, after a random delay in `[0, rw]`. Because `e` is new with every Broadcaster, a lost update before a restart can't leave a client holding a roster with a matching `rv`.
 - **Shared reads are cached.** `/ext/roster`, `/ext/describe` and the public view that `/ext/view` gives viewers without identity are the same for every viewer of a channel. The server builds each one once, per (`e`, `rv`), per `cv`, or per Room `inputs` value, and serves that copy to every viewer. These audience-wide fetches are spread by `rw`, but they aren't counted in §5.5's own-state target, because each costs a cache lookup, not a Room read.
-- **When a send is an `rf`.** A Broadcaster's next send is an `rf` whenever one of these is due:
+- **When a send is an `rf`.** A Broadcaster's next send is an `rf` whenever one of these is due, and it goes out on the first tick after it becomes due, whether or not anything changed:
   - **It's the first Broadcaster for this channel since the process started**, whether at boot or on a later on-demand load. Changes may have been lost across a restart or a crash. This send goes out on its first tick.
   - **The channel's pacing gate has recorded dropped keys.** That can happen before this Broadcaster started, or later, while it runs: an earlier Broadcaster's last send can fail within its 30 s retry. If no Broadcaster is running for the channel, the next one to start makes the `rf`.
   - **The config changed** (`cv` moved, §5.1). A config change can alter every character's own state, loaded or not, so every viewer refetches.
@@ -248,8 +249,8 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
 The snapshot is serialized and measured in bytes. Over 5 KB, in this order:
 
 1. Trim `p` to the first members by join order that fit, and add `pt`.
-2. If it still doesn't fit with `p` empty, replace `ch` with `rf: true`.
-3. If it still doesn't fit (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it.
+2. If it still doesn't fit with `p` empty, keep in `ch` the longest-waiting keys that fit, and carry the rest to the next send (§5.3). The backlog cap (§5.3) turns a growing backlog into an `rf`.
+3. If it still doesn't fit with `ch` empty too (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it.
 
 In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that gets it keeps its current roster, unless `e` changed, in which case the `e` rule applies (it refetches the roster). It takes the public state (phase, fight, party, adventure) from a `/ext/view` fetch, made after a random delay in `[0, rw]`: its own view with identity, or the cached public view (§5.3) without. Every field other than `v`, `e`, `t`, `rw` and `cv` is optional in the format, and absence means "not in this snapshot", never null.
 
@@ -258,7 +259,7 @@ In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that get
 `rw` tells clients how long to spread their own-state fetches. Each viewer picks a random delay in `[0, rw]`.
 
 - With a changed list, `rw` is the number of keys × 10 ms, at least 1,000 ms and at most 30,000 ms.
-- With `rf`, `rw` is always 30,000 ms. `rf` is rare: a channel's first Broadcaster after a restart, dropped keys, a config change, or a changed list that doesn't fit (§5.4). Every viewer with identity fetches, and the server can't count them, so it uses the longest window.
+- With `rf`, `rw` is always 30,000 ms. `rf` is rare: a channel's first Broadcaster after a restart, dropped keys, a config change, a backlog of more than 3,000 waiting keys (§5.3), or a snapshot that doesn't fit even without `p` and `ch` (§5.4). Every viewer with identity fetches, and the server can't count them, so it uses the longest window.
 
 The server sets it, so it can be tuned without an extension update.
 
@@ -266,6 +267,7 @@ The server sets it, so it can be tuned without an extension update.
 
 - **Beyond about 3,000 fetching viewers**, the 30 s cap wins and the rate rises above the target.
 - **Windows overlap.** Each send sizes `rw` from its own keys only, and sends can go out every second. In a long fight where more than 100 keys change every second, the rate follows the number of changed keys per second instead (roughly 300 a second with 3,000 active members, from Attack's 10 s cooldown and monster turns hitting many targets). An `rf` that lands inside another `rf`'s 30 s window doubles the `rf` rate while they overlap.
+- **More changes than fit.** About 365 keys fit in one snapshot. If more keys than that change every second for a long stretch, the backlog grows until it passes the cap, and the channel gets an `rf` every so often.
 
 An acting viewer's own key stays in `ch` even though their `/ext/commands` answer carried their view, because a timer can change their state again before the next send. The constants live in one place, so they can be tuned.
 
@@ -445,7 +447,7 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - at most one send per second;
   - no send when nothing changed;
   - failed sends and 429s keep their keys;
-  - a first send has `rf` at boot and after dropped keys, including keys dropped while a newer Broadcaster already runs; on an ordinary load nothing is sent until something changes, and a `join` that loaded the Room is sent; `e` is new with every Broadcaster;
+  - a first send has `rf` at boot and after dropped keys, including keys dropped while a newer Broadcaster already runs, and each goes out on the first tick even when nothing changed; on an ordinary load nothing is sent until something changes, and a `join` that loaded the Room is sent; `e` is new with every Broadcaster;
   - the bare fallback omits `ph`, `adv`, `f`, `p` and `rv`, and `/ext/roster` and `/ext/describe` are served from a cache;
   - a replayed `/ext/commands` request gets a fresh `view` and `key`;
   - with the starter pack, a public change (monster HP, an overlay tally) puts nobody in `changed`; with a test pack whose `canUse` reads monster HP, a monster HP change puts the affected members in `changed`;
@@ -454,7 +456,8 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - a fight starting puts members whose readiness flips in `changed`, and a cooldown ending alone doesn't;
   - the first Broadcaster for a channel after a restart sends `rf`, at boot or on a later load;
   - the unload's last `broadcastState()` runs before the Room closes;
-  - trimming and the `rf` fallbacks at 5 KB (§5.4);
+  - at 5 KB (§5.4): trimming `p`, carrying keys that don't fit to the next send, and the bare fallback;
+  - more than 3,000 waiting keys (from overflow or failed sends) makes the next send an `rf` and clears them once it succeeds;
   - the `rw` values;
   - the last tick on unload;
   - **a secret shop's content never appears in any snapshot**, while a member who equips a bought item mid-shop changes their `p` entry and `rv` (criterion 3);
