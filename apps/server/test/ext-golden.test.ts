@@ -1,5 +1,6 @@
-import { parseDuration } from '@dndm/engine';
+import { type GameEvent, parseDuration } from '@dndm/engine';
 import { afterEach, describe, expect, it } from 'vitest';
+import { visibleTo } from '../src/room';
 import { direct, type Line, type Out, read, scripts, toId, unprefix } from './helpers/golden';
 import { twitchSetup } from './helpers/twitch';
 
@@ -41,14 +42,22 @@ async function viaExt(lines: Line[]): Promise<Out[]> {
       continue;
     }
     if (l.as === 'streamer') {
+      const from = out.length;
       const a = await x.dock(toId(l.command, 'twitch:') as typeof l.command);
       if (!a.ok) out.push({ rejected: a.error.code });
+      else expect(a.events).toEqual(out.slice(from)); // the dock sees every event this call produced
       continue;
     }
+    const from = out.length;
     const { character: _drop, ...command } = l.command;
     const r = await x.ext('POST', '/ext/commands', { jwt: x.jwt({ user: l.as }), body: { id: `g${++n}`, command: toId(command, 'twitch:') } });
     const body = r.json();
     if (!body.ok) out.push({ rejected: body.error.code });
+    else {
+      const made = out.slice(from) as GameEvent[];
+      // The viewer's answer holds the events of this call that are public or addressed to them.
+      expect(body.events).toEqual(made.filter((e) => visibleTo(e, 'viewer', `twitch:${l.as}`)));
+    }
   }
   return unprefix(out, 'twitch:') as Out[];
 }
