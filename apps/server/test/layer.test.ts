@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { FakeClock } from '../src/clock';
 import { Secrets } from '../src/crypto';
-import { IDLE_ROOM, type Room } from '../src/room';
+import type { Answer } from '@dndm/protocol';
+import { IDLE_ROOM, type Room, RoomClosedError } from '../src/room';
 import { createChannel, defaultConfig, startServer } from '../src/server';
 import { freshDb } from './helpers/db';
 import { officialTestBundles, SECRET } from './helpers/room';
@@ -132,6 +133,37 @@ describe('TwitchLayer (spec 2b §5.3, §7.4)', () => {
     const sent = s.snapshots();
     expect(sent).toHaveLength(2);
     expect(sent[1]).toMatchObject({ e: b.epoch, cv: 2, rf: true });
+  }, T);
+
+  it('an input that arrives during an unload lands on a fresh Room, and its change reaches viewers', async () => {
+    s = await twitchSetup();
+    const room = (await s.srv.manager.get(s.channelId))!;
+    await s.advance(1000);
+    makeIdle(s, room);
+    // Queue inputs right behind the unload's last read: one straight on the old Room, one through the app route.
+    const real = room.broadcastState.bind(room);
+    let direct: Promise<unknown> | undefined;
+    let routed: Promise<Answer> | undefined;
+    room.broadcastState = (o) => {
+      const p = real(o);
+      if (o?.last) {
+        direct = room.command({ role: 'dock' }, 'direct-1', { type: 'openSession' });
+        routed = s!.dock({ type: 'openSession' });
+      }
+      return p;
+    };
+    await s.srv.manager.sweep();
+    await expect(direct).rejects.toBeInstanceOf(RoomClosedError);
+    expect((await routed!).ok).toBe(true);
+    expect(room.closed).toBe(true);
+    expect(room.game.session).toBeNull(); // nothing ran on the old Room after its last read
+    const fresh = (await s.srv.manager.get(s.channelId))!;
+    expect(fresh).not.toBe(room);
+    expect(fresh.game.session).not.toBeNull();
+    await s.advance(2000);
+    const last = s.snapshots().at(-1)!;
+    expect(last.e).toBe(s.srv.layer!.broadcaster(s.channelId)!.epoch);
+    expect(last.ph).not.toBe('closed');
   }, T);
 
   it('a reload within a second queues its first send behind the old last send', async () => {

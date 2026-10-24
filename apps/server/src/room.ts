@@ -175,10 +175,13 @@ export class Room {
   /**
    * Spec 2b §5.2: the public view, the loaded characters whose comparison view changed since it was last recorded
    * (recording the current ones), and the input count. Not activity: it leaves lastActivity alone.
+   * With `last`, it is the Room's final read (spec 2b §5.3 "Unloading"): the Room closes in the same queue slot, so every
+   * input queued after it fails with RoomClosedError and retries on a freshly loaded Room.
    */
-  async broadcastState(): Promise<BroadcastState> {
+  async broadcastState(opts: { last?: boolean } = {}): Promise<BroadcastState> {
     if (!this.broadcasting) throw new Error('broadcastState needs a Room with a Broadcaster');
     return this.run(async () => {
+      if (opts.last) this.close();
       const now = this.deps.clock.now();
       const changed: string[] = [];
       for (const [id, v] of comparisonViews(this.engine, this.game, Object.keys(this.game.characters), now)) {

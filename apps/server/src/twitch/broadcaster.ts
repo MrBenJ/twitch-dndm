@@ -95,15 +95,15 @@ export class Broadcaster {
   }
 
   /**
-   * Stops the tick, runs the last broadcastState() through the Room's queue, and builds the last snapshot (skipping
-   * the bare 30 s throttle: nothing sends after it). The returned function sends it through the gate (retrying until
+   * Stops the tick, runs the last broadcastState() through the Room's queue as its final read (the Room closes in that
+   * slot), and builds the last snapshot (skipping the bare 30 s throttle: nothing sends after it). The returned function sends it through the gate (retrying until
    * `retryUntil`, or once when null) and resolves with whether it was delivered. It resolves true without sending
    * only when nothing was owed: no keys waiting, no rf due, and content unchanged since the last delivered send.
    */
   async final(): Promise<(retryUntil: number | null) => Promise<boolean>> {
     this.stop();
     if (this.ticking) await this.ticking;
-    const plan = this.plan(await this.d.room.broadcastState(), true);
+    const plan = this.plan(await this.d.room.broadcastState({ last: true }), true);
     return async (retryUntil) => {
       if (!plan) return true;
       return this.d.gate.send(this.d.twitchId, this.attempt(plan), retryUntil === null ? {} : { retryUntil });

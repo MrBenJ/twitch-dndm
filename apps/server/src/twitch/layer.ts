@@ -87,6 +87,7 @@ export class TwitchLayer implements RoomHooks {
       this.o.log?.('last broadcast read failed on unload', { twitchId, error: String(e) });
       return;
     } finally {
+      // final()'s read already closed the Room in its queue slot; this covers a read that never ran.
       room.close();
     }
     // In the background: the unload doesn't wait for it. gate.idle() covers it while an attempt runs.

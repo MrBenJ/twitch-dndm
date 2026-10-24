@@ -1,5 +1,6 @@
 import { definePack, type PackBundle } from '@dndm/engine';
 import { afterEach, describe, expect, it } from 'vitest';
+import { RoomClosedError } from '../src/room';
 import { officialTestBundles, roomSetup } from './helpers/room';
 
 let s: Awaited<ReturnType<typeof roomSetup>>;
@@ -163,6 +164,16 @@ describe('room.broadcastState() (spec 2b §5.2)', () => {
     // Measured ~5 ms on the dev machine (~820 ms before the batched engine.ownViews); the bound leaves a wide margin.
     expect(ms).toBeLessThan(100);
   }, 60_000);
+
+  it('broadcastState({ last: true }) is the final read: the Room closes in its slot and inputs queued behind it fail', async () => {
+    s = await roomSetup({ broadcast: true });
+    const read = s.room.broadcastState({ last: true });
+    const cmd = s.cmd(s.dock, { type: 'openSession' });
+    await read;
+    expect(s.room.closed).toBe(true);
+    await expect(cmd).rejects.toBeInstanceOf(RoomClosedError);
+    expect(s.room.game.session).toBeNull();
+  });
 
   it('a Room without a Broadcaster refuses broadcastState', async () => {
     s = await roomSetup();
