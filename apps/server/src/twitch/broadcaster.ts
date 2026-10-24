@@ -59,6 +59,10 @@ export class Broadcaster {
   private firstPending: boolean;
   private lastBareAt = -Infinity;
   private inputsAtBare: number | null = null;
+  /** The last snapshot was bare and owed a send that the 30 s throttle held back. */
+  private barePending = false;
+  /** A tick's send failed and nothing has been delivered since: the next tick reads again even if nothing moved. */
+  private unsent = false;
   private cancelTimer: (() => void) | null = null;
   private stopped = false;
   private ticking: Promise<void> | null = null;
@@ -91,14 +95,15 @@ export class Broadcaster {
   }
 
   /**
-   * Stops the tick, runs the last broadcastState() through the Room's queue, and builds the last snapshot. The
-   * returned function sends it through the gate (retrying until `retryUntil`, or once when null); it resolves true
-   * when there was nothing to send.
+   * Stops the tick, runs the last broadcastState() through the Room's queue, and builds the last snapshot (skipping
+   * the bare 30 s throttle: nothing sends after it). The returned function sends it through the gate (retrying until
+   * `retryUntil`, or once when null) and resolves with whether it was delivered. It resolves true without sending
+   * only when nothing was owed: no keys waiting, no rf due, and content unchanged since the last delivered send.
    */
   async final(): Promise<(retryUntil: number | null) => Promise<boolean>> {
     this.stop();
     if (this.ticking) await this.ticking;
-    const plan = this.plan(await this.d.room.broadcastState());
+    const plan = this.plan(await this.d.room.broadcastState(), true);
     return async (retryUntil) => {
       if (!plan) return true;
       return this.d.gate.send(this.d.twitchId, this.attempt(plan), retryUntil === null ? {} : { retryUntil });
@@ -133,7 +138,8 @@ export class Broadcaster {
   }
 
   private async runTick(): Promise<void> {
-    if (this.d.room.inputs === this.lastInputs && this.waiting.size === 0 && !this.due()) return;
+    const bareOwed = this.barePending && this.d.clock.now() - this.lastBareAt >= RF_WINDOW;
+    if (this.d.room.inputs === this.lastInputs && this.waiting.size === 0 && !bareOwed && !this.unsent && !this.due()) return;
     let r: BroadcastState;
     try {
       r = await this.d.room.broadcastState();
@@ -141,10 +147,11 @@ export class Broadcaster {
       if (!(e instanceof RoomClosedError)) this.d.log?.('broadcast read failed', { twitchId: this.d.twitchId, error: String(e) });
       return;
     }
-    if (this.stopped) return;
+    // Fold the result in even if stopped meanwhile: the Room has recorded these views, so final() must carry the keys.
     const plan = this.plan(r);
-    if (!plan) return;
+    if (!plan || this.stopped) return;
     this.sending = true;
+    this.unsent = true;
     const attempt = this.attempt(plan);
     // Cleared inside the attempt too, so it is false by the time gate.idle() can resolve.
     const once = async () => { try { return await attempt(); } finally { this.sending = false; } };
@@ -152,7 +159,7 @@ export class Broadcaster {
   }
 
   /** Folds a broadcastState() result into the waiting keys and roster, builds the snapshot, and decides whether it goes out. */
-  private plan(r: BroadcastState): Planned | null {
+  private plan(r: BroadcastState, last = false): Planned | null {
     this.lastInputs = r.inputs;
     for (const id of r.changed) this.waiting.add(this.d.keyOf(id));
     const roster = this.rosterOf(r.publicView);
@@ -168,9 +175,12 @@ export class Broadcaster {
     });
 
     let send: boolean;
+    this.barePending = false;
     if (built.bare) {
-      // §5.4 step 3: at most once per 30 s and only after a change, unless an rf is due.
-      send = due || (this.d.clock.now() - this.lastBareAt >= RF_WINDOW && (r.inputs !== this.inputsAtBare || this.waiting.size > 0));
+      // §5.4 step 3: at most once per 30 s and only after a change, unless an rf is due (or this is the last send).
+      const owed = this.waiting.size > 0 || r.inputs !== this.inputsAtBare || built.content !== this.lastSent;
+      send = due || (owed && (last || this.d.clock.now() - this.lastBareAt >= RF_WINDOW));
+      this.barePending = owed && !send;
       if (send) this.d.log?.('snapshot does not fit; sending a bare rf', { twitchId: this.d.twitchId, due });
     } else {
       send = built.rf || built.content !== this.lastSent || built.sentKeys.length > 0;
@@ -189,6 +199,7 @@ export class Broadcaster {
 
   private delivered({ built, cv, inputs, dropped }: Planned): void {
     this.lastSent = built.content;
+    this.unsent = false;
     if (built.rf) {
       this.waiting.clear();
       this.firstPending = false;

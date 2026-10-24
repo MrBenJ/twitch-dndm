@@ -64,6 +64,29 @@ async function updateConfig() {
   expect((await dock({ type: 'updateConfig', config, basedOn: configVersion })).ok).toBe(true);
 }
 
+/** A held fight against a monster whose name is too long for any snapshot to fit. */
+const long: PackBundle = {
+  manifest: { id: 'tb', version: '1.0.0', name: 'Test Bundle', depends: { starter: '^1.0.0' } },
+  official: true,
+  content: [{
+    monster: 'long', name: 'L'.repeat(6000), hp: 1000, stats: { 'starter:attack': 1 }, abilities: ['starter:club-swing'],
+    behavior: { 'starter:weighted': { abilities: { 'starter:club-swing': 1 }, 'targets-per': 1 } }, interval: '15s',
+  }].map((doc, index) => ({ file: 'tb.yaml', index, doc })),
+  register: definePack({ register() {} }).register,
+};
+
+async function setupLong() {
+  await setup({
+    bundles: [...(await officialTestBundles()), long],
+    before: async () => {
+      await dock({ type: 'openSession' });
+      await join('al');
+      await dock({ type: 'spawnMonster', monster: 'tb:long' });
+      await dock({ type: 'holdMonster' });
+    },
+  });
+}
+
 describe('Broadcaster (spec 2b §5.3–§5.5)', () => {
   it('first since start: an rf goes out on the first tick even though nothing changed', async () => {
     await setup({ first: true });
@@ -249,24 +272,7 @@ describe('Broadcaster (spec 2b §5.3–§5.5)', () => {
   }, T);
 
   it('while snapshots never fit, the bare rf goes out at most once per 30 s and only after a change; a config change still goes out', async () => {
-    const long: PackBundle = {
-      manifest: { id: 'tb', version: '1.0.0', name: 'Test Bundle', depends: { starter: '^1.0.0' } },
-      official: true,
-      content: [{
-        monster: 'long', name: 'L'.repeat(6000), hp: 1000, stats: { 'starter:attack': 1 }, abilities: ['starter:club-swing'],
-        behavior: { 'starter:weighted': { abilities: { 'starter:club-swing': 1 }, 'targets-per': 1 } }, interval: '15s',
-      }].map((doc, index) => ({ file: 'tb.yaml', index, doc })),
-      register: definePack({ register() {} }).register,
-    };
-    await setup({
-      bundles: [...(await officialTestBundles()), long],
-      before: async () => {
-        await dock({ type: 'openSession' });
-        await join('al');
-        await dock({ type: 'spawnMonster', monster: 'tb:long' });
-        await dock({ type: 'holdMonster' });
-      },
-    });
+    await setupLong();
     await advance(5000);
     expect(sent()).toEqual([]); // nothing changed since the load
     for (let i = 0; i < 60; i++) {
@@ -404,6 +410,59 @@ describe('Broadcaster (spec 2b §5.3–§5.5)', () => {
     // The timer is stopped: nothing more goes out.
     await s!.clock.advance(5000, () => b!.idle());
     expect(sent()).toHaveLength(1);
+  }, T);
+
+  it('a public-only change held back by the bare throttle goes out once the 30 s window passes', async () => {
+    await setupLong();
+    await dock({ type: 'giveGold', target: 'dev:al', amount: 1 });
+    await advance(1000);
+    expect(sent()).toHaveLength(1);
+    const first = sent()[0]!.t;
+    await advance(5000);
+    await dock({ type: 'setMonsterHp', value: 900 }); // public only: no key waits
+    await advance(40_000);
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1]!.rf).toBe(true);
+    expect(sent()[1]!.t - first).toBeGreaterThanOrEqual(30_000);
+    expect(sent()[1]!.t - first).toBeLessThanOrEqual(31_000);
+  }, T);
+
+  it('a public-only change whose send failed is sent again on a later tick', async () => {
+    await setup({ before: async () => { await dock({ type: 'openSession' }); await join('al'); await dock({ type: 'spawnMonster', monster: 'starter:slime' }); await dock({ type: 'holdMonster' }); } });
+    fake!.failNext('pubsub');
+    await dock({ type: 'setMonsterHp', value: 50 });
+    await advance(1000);
+    expect(sent()).toEqual([]);
+    await advance(5000);
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]!.f).toMatchObject({ hp: 50 });
+    expect(sent()[0]!.ch).toEqual([]);
+  }, T);
+
+  it('final() skips the bare throttle and sends the waiting keys', async () => {
+    await setupLong();
+    await dock({ type: 'giveGold', target: 'dev:al', amount: 1 });
+    await advance(1000);
+    expect(sent()).toHaveLength(1);
+    await dock({ type: 'giveGold', target: 'dev:al', amount: 1 }); // al's key waits, inside the window
+    await advance(5000);
+    expect(sent()).toHaveLength(1);
+    const send = await b!.final();
+    s!.room.close();
+    expect(await send(null)).toBe(true);
+    expect(sent()).toHaveLength(2);
+    expect(sent()[1]).toMatchObject({ rf: true, rw: 30_000 });
+  }, T);
+
+  it('final() carries the keys of a tick whose read was still queued', async () => {
+    await setup({ before: async () => { await dock({ type: 'openSession' }); } });
+    await join('al');
+    void b!.tick(); // its broadcastState() is queued; final() stops the Broadcaster before it resolves
+    const send = await b!.final();
+    s!.room.close();
+    expect(await send(null)).toBe(true);
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]!.ch).toEqual([key('al')]);
   }, T);
 
   it('final() with nothing to send resolves true without sending', async () => {
