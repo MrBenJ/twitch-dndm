@@ -38,8 +38,8 @@ ${bodyHtml}
 `;
 }
 
-const html = (res: FastifyReply, status: number, title: string, bodyHtml: string) =>
-  res.code(status).header('content-type', 'text/html; charset=utf-8').header('cache-control', 'no-store').send(page(title, bodyHtml));
+const html = (res: FastifyReply, status: number, title: string, bodyHtml: string, headers: Record<string, string> = {}) =>
+  res.code(status).headers({ 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers }).send(page(title, bodyHtml));
 
 /** A sign-up failure page (spec 2b §8): the message and a link back to `/signup`. */
 const failure = (res: FastifyReply, status: number, message: string) =>
@@ -123,23 +123,32 @@ function signupRoutes(app: FastifyInstance, deps: SignupDeps): void {
     const channel = await sessionChannel(req.headers.cookie);
     if (!channel) return signedOut(res);
     const base = deps.config.publicUrl;
-    const dock = deps.secrets.decrypt(channel.dockTokenEnc);
-    const overlay = deps.secrets.decrypt(channel.overlayTokenEnc);
+    // After a DNDM_SECRET rotation the stored tokens can't be decrypted; the streamer regenerates them.
+    const reveal = (enc: string): string | null => {
+      try {
+        return deps.secrets.decrypt(enc);
+      } catch (e) {
+        deps.log?.('setup: token decrypt failed', { channelId: channel.id, error: String(e) });
+        return null;
+      }
+    };
+    const dock = reveal(channel.dockTokenEnc);
+    const overlay = reveal(channel.overlayTokenEnc);
+    const lost = "This URL can't be shown because the server's key changed. Regenerate it.";
     const csrf = esc(deps.cookies.csrf(req.headers.cookie) ?? '');
     const form = (action: string, which: string | null, label: string) =>
       `<form method="post" action="${action}">${which ? `<input type="hidden" name="which" value="${which}">` : ''}`
       + `<input type="hidden" name="csrf" value="${csrf}"><button type="submit">${label}</button></form>`;
     return html(res, 200, 'Setup', [
       `<h1>${esc(channel.name)}</h1>`,
-      `<p>Dock URL: <code>${esc(`${base}/dock#${dock}`)}</code></p>`,
+      dock === null ? `<p>Dock URL: ${esc(lost)}</p>` : `<p>Dock URL: <code>${esc(`${base}/dock#${dock}`)}</code></p>`,
       form('/setup/regenerate', 'dock', 'Regenerate dock URL'),
-      `<p>Overlay URL: <code>${esc(`${base}/overlay#${overlay}`)}</code></p>`,
+      overlay === null ? `<p>Overlay URL: ${esc(lost)}</p>` : `<p>Overlay URL: <code>${esc(`${base}/overlay#${overlay}`)}</code></p>`,
       form('/setup/regenerate', 'overlay', 'Regenerate overlay URL'),
-      `<p>Connect the CLI: <code>${esc(`dndm connect ${base} --channel ${channel.id} --dock ${dock}`)}</code></p>`,
+      dock === null ? `<p>Connect the CLI: ${esc(lost)}</p>` : `<p>Connect the CLI: <code>${esc(`dndm connect ${base} --channel ${channel.id} --dock ${dock}`)}</code></p>`,
       `<p><a href="${esc(`https://dashboard.twitch.tv/extensions/${deps.config.clientId}`)}">Install the extension</a></p>`,
       form('/signout', null, 'Sign out'),
-    ].join('\n'))
-      .header('referrer-policy', 'no-referrer');
+    ].join('\n'), { 'referrer-policy': 'no-referrer' });
   });
 
   app.post('/setup/regenerate', async (req, res) => {

@@ -6,3 +6,5 @@ docs
 .superpowers
 .claude
 *.tsbuildinfo
+.env*
+*.log

@@ -40,4 +40,10 @@ describe('deploy files', () => {
     expect(runbook).toContain('fly deploy --ha=false');
     expect(runbook).toContain('fly scale count 1');
   });
+
+  it('.dockerignore keeps env files and logs out of the build context', () => {
+    const lines = read('.dockerignore').split('\n').map((l) => l.trim());
+    expect(lines).toContain('.env*');
+    expect(lines).toContain('*.log');
+  });
 });

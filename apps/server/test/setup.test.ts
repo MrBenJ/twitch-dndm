@@ -48,6 +48,29 @@ describe('setup page (spec 2b §4.4)', () => {
     expect(res.headers['referrer-policy']).toBe('no-referrer');
   }, T);
 
+  it('after a DNDM_SECRET rotation /setup still renders and regenerate recovers the URL', async () => {
+    const { x, post, channel } = await signedIn();
+    const oldBody = (await x.srv.app.inject({ url: '/setup', headers: { cookie: sessionCookie(await signIn(x)) } })).body;
+    const oldDock = /\/dock#([^<]+)</.exec(oldBody)![1]!;
+    await x.restart('a-completely-different-secret-value');
+    const cookie = sessionCookie(await signIn(x));
+    const res = await x.srv.app.inject({ url: '/setup', headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("This URL can&#39;t be shown because the server&#39;s key changed. Regenerate it.");
+    expect(res.body).not.toContain(oldDock);
+    expect(res.body).toContain('Regenerate dock URL');
+    expect(res.body).toContain('Regenerate overlay URL');
+    expect(res.body).toContain('Sign out');
+    expect(res.body).not.toContain('dndm connect');
+    const csrf = /name="csrf" value="([^"]+)"/.exec(res.body)![1]!;
+    const regen = await post('/setup/regenerate', `which=dock&csrf=${encodeURIComponent(csrf)}`, cookie);
+    expect(regen.statusCode).toBe(303);
+    const after = (await x.srv.app.inject({ url: '/setup', headers: { cookie } })).body;
+    const newDock = /\/dock#([^<]+)</.exec(after)![1]!;
+    expect(newDock).not.toBe(oldDock);
+    expect(after).toContain(`dndm connect https://dndm.example --channel ${channel.id} --dock ${newDock}`);
+  }, T);
+
   it('a session for a channel whose twitch_id changed is sent back to /signup', async () => {
     const { x, get, channel } = await signedIn();
     await x.srv.store.sql`update channels set twitch_id = '78' where id = ${channel.id}`;

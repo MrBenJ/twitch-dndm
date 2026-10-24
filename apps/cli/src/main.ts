@@ -16,7 +16,7 @@ Commands:
   server migrate                                                   apply database migrations
   server create-channel <name> [--config file] [--seed n]          create a channel; prints its tokens
   server allow <login>                                             let a Twitch streamer sign up (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET)
-  server disallow <login>                                          take a streamer off the allowlist
+  server disallow <login>                                          take a streamer off the allowlist (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET)
   server allowlist                                                 list who may sign up
   server start [--port 8787] [--host 127.0.0.1]                    run the server (DATABASE_URL, DNDM_SECRET, DNDM_DEV=1)
   connect <url> --channel <id> (--dock <token> | --viewer <name>) [--script file.jsonl] [--timeout 30s]

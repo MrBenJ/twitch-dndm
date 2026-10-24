@@ -123,10 +123,10 @@ export async function twitchSetup(o: { serverOpts?: Partial<ServerOpts>; startAt
     /** Snapshots delivered to a channel's topic (1001 unless given), oldest first. */
     snapshots: (twitchId = TWITCH_ID): Snapshot[] =>
       fake.pubsub().filter((m) => m.broadcasterId === twitchId).map((m) => m.message as Snapshot),
-    /** Closes the server and starts a new process on the same database, fake Twitch and clock. */
-    async restart(): Promise<RunningServer> {
+    /** Closes the server and starts a new process on the same database, fake Twitch and clock (optionally with another DNDM_SECRET). */
+    async restart(secret?: string): Promise<RunningServer> {
       await closeOnClock(srv, clock);
-      srv = await startServer(opts());
+      srv = await startServer({ ...opts(), ...(secret !== undefined ? { secret } : {}) });
       return srv;
     },
     async close(): Promise<void> {
