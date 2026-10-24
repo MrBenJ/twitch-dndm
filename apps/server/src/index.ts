@@ -4,3 +4,6 @@ export { hashToken, newToken, Secrets } from './crypto';
 export { FakeClock, realClock, type Clock } from './clock';
 export { createChannel, defaultConfig, officialBundles, startServer, type RunningServer, type ServerOpts } from './server';
 export { readTwitchConfig, TWITCH_API_BASE, TWITCH_AUTH_BASE, type TwitchConfig } from './config';
+export { RoomManager, type RoomHooks } from './room-manager';
+export { TwitchLayer } from './twitch/layer';
+export { HttpTwitchClient, type TwitchClient } from './twitch/api';

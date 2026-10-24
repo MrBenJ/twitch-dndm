@@ -90,6 +90,15 @@ describe('Store (spec 2a §3, §6)', () => {
     expect((await store.room(id))!.seq).toBe(2);
   });
 
+  it('finds a channel by its Twitch ID, and null for one without', async () => {
+    const id = await store.createChannel({
+      name: 'tw', config: { packs: ['starter'] }, room: room(), dock: tok('tw-d'), overlay: tok('tw-o'), twitchId: '555',
+    });
+    expect(await store.channelByTwitchId('555')).toMatchObject({ id, twitchId: '555' });
+    expect(await store.channelByTwitchId('556')).toBeNull();
+    expect((await store.channel(await newChannel()))!.twitchId).toBeNull();
+  });
+
   it('takes the advisory lock once per database', async () => {
     expect(await store.tryLock()).toBe(true);
     const other = Store.open(t.url);

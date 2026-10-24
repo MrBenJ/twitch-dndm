@@ -10,7 +10,14 @@ import { RateLimiter } from './auth';
 import { type Clock, realClock } from './clock';
 import { Hub } from './hub';
 import { RoomManager } from './room-manager';
-import { Store } from './store';
+import { type ChannelRow, Store } from './store';
+import { HttpTwitchClient, type TwitchClient } from './twitch/api';
+import { TwitchLayer } from './twitch/layer';
+
+/** Shutdown step 3's budget (spec 2b §7.4). */
+const LAYER_SHUTDOWN_MS = 10_000;
+/** How long shutdown waits for the HTTP server once its connections are cut, at least. */
+const LAST_CLOSE_MS = 1000;
 
 /** Every official pack, code included: any channel may enable any of them (spec 2a §2.2). */
 export function officialBundles(): Promise<PackBundle[]> {
@@ -24,6 +31,7 @@ export function defaultConfig(): Record<string, unknown> {
 /** Spec 2a §8.1: validates the config, creates the channel and its room, returns the tokens. */
 export async function createChannel(o: {
   store: Store; secrets: Secrets; bundles: PackBundle[]; name: string; config: Record<string, unknown>; seed: number;
+  twitchId?: string;
 }): Promise<{ id: string; dockToken: string; overlayToken: string }> {
   const engine = createEngine({ packs: o.bundles, channel: o.config });
   const g = engine.newGame({ seed: o.seed });
@@ -35,6 +43,7 @@ export async function createChannel(o: {
     room: { stateVersion: g.version, clock: g.clock, rng: g.rng, seq: g.seq, session: g.session, recentRequests: [] },
     dock: { hash: hashToken(dockToken), enc: o.secrets.encrypt(dockToken) },
     overlay: { hash: hashToken(overlayToken), enc: o.secrets.encrypt(overlayToken) },
+    ...(o.twitchId !== undefined ? { twitchId: o.twitchId } : {}),
   });
   return { id, dockToken, overlayToken };
 }
@@ -45,11 +54,15 @@ export interface ServerOpts {
   /** How long close() waits for in-flight Room inputs before giving up (default 15 000). */
   idleTimeoutMs?: number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
-  /** Twitch extension settings; used from the Twitch layer onwards. */
+  /** Twitch extension settings; without them there is no Twitch layer and no Broadcasters. */
   twitch?: TwitchConfig;
+  /** Replaces the HTTP Twitch client (tests). */
+  twitchClient?: TwitchClient;
 }
 export interface RunningServer {
   app: FastifyInstance; manager: RoomManager; hub: Hub; store: Store; secrets: Secrets; url: string;
+  /** The Twitch layer, or null when Twitch isn't configured. */
+  layer: TwitchLayer | null;
   close(): Promise<void>;
 }
 
@@ -65,7 +78,16 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     const clock = opts.clock ?? realClock;
     const secrets = new Secrets(opts.secret);
     const bundles = opts.bundles ?? (await officialBundles());
-    const manager = new RoomManager({ store, clock, secrets, bundles, log: opts.log });
+    const layer = opts.twitch
+      ? new TwitchLayer({
+        config: opts.twitch, client: opts.twitchClient ?? new HttpTwitchClient(opts.twitch, clock), clock, secrets,
+        ...(opts.log ? { log: opts.log } : {}),
+      })
+      : null;
+    const manager = new RoomManager(
+      { store, clock, secrets, bundles, log: opts.log, ...(layer ? { broadcast: (c: ChannelRow) => layer.wantsBroadcast(c) } : {}) },
+      layer ?? undefined,
+    );
     const hub = new Hub();
     const health: { ready: boolean; closing?: boolean } = { ready: false };
     app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev, health, log: opts.log });
@@ -97,12 +119,20 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
         if (idle === 'timeout') log?.('shutdown: rooms still busy after idle timeout', { idleTimeoutMs });
         // In-flight responses get the rest of the budget, then any connection still open is cut.
         const rest = until(deadline - performance.now());
-        await Promise.race([appClosed, rest.p]);
-        rest.cancel();
+        try { await Promise.race([appClosed, rest.p]); } finally { rest.cancel(); }
         running.server.closeAllConnections();
-        await appClosed;
+        // Cut connections let app.close() finish; don't let it hold up the rest of shutdown if it doesn't.
+        const last = until(Math.max(LAST_CLOSE_MS, deadline - performance.now()));
+        try {
+          if ((await Promise.race([appClosed.then(() => 'closed' as const), last.p])) === 'timeout') log?.('shutdown: HTTP server still closing');
+        } finally { last.cancel(); }
       } finally {
-        // 3. Unload the Rooms, then close the database, even if closing the HTTP app failed.
+        // 3. Each Broadcaster's last tick, waiting at most 10 s more (spec 2b §7.4). Runs even if closing the HTTP app
+        // failed; its own failure mustn't keep the Rooms or the database open.
+        if (layer) {
+          try { await layer.shutdown(LAYER_SHUTDOWN_MS); } catch (e) { log?.('shutdown: Twitch layer failed', { error: String(e) }); }
+        }
+        // 4. Unload the Rooms, then close the database, which releases the lock.
         manager.close();
         await store.close();
       }
@@ -110,7 +140,7 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
 
     let closing: Promise<void> | null = null;
     return {
-      app: running, manager, hub, store, secrets, url,
+      app: running, manager, hub, store, secrets, url, layer,
       close() {
         closing ??= shutdown();
         return closing;

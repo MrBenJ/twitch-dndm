@@ -89,6 +89,18 @@ describe('shutdown', () => {
     await srv.close();
   });
 
+  it('close() finishes even if the HTTP app never finishes closing', async () => {
+    const srv = await startServer({ databaseUrl: t.url, secret: SECRET, clock: new FakeClock(0), rateLimits: false, idleTimeoutMs: 300 });
+    const realClose = srv.app.close.bind(srv.app);
+    (srv.app as { close: () => Promise<void> }).close = () => new Promise<void>(() => {});
+    const t0 = performance.now();
+    await srv.close();
+    expect(performance.now() - t0).toBeLessThan(3_000);
+    await realClose();
+    const again = await startServer({ databaseUrl: t.url, secret: SECRET, clock: new FakeClock(0), rateLimits: false });
+    await again.close();
+  }, 10_000);
+
   it('the database is closed even if closing the HTTP app fails', async () => {
     const srv = await startServer({ databaseUrl: t.url, secret: SECRET, clock: new FakeClock(0), rateLimits: false });
     const realClose = srv.app.close.bind(srv.app);
