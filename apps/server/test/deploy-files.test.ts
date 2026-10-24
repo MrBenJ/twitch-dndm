@@ -35,4 +35,9 @@ describe('deploy files', () => {
   it('the runbook says it is not a self-hosting guide', () => {
     expect(runbook).toContain("It isn't a self-hosting guide.");
   });
+
+  it('the runbook deploys a single machine the first time', () => {
+    expect(runbook).toContain('fly deploy --ha=false');
+    expect(runbook).toContain('fly scale count 1');
+  });
 });

@@ -35,12 +35,18 @@ It takes you from nothing to a running server on Fly with a Neon database, then 
 
    Say yes to using the existing `fly.toml`, and no to a database.
 
-3. Set the secrets. `DNDM_SECRET` is any random string of 16 or more characters; keep a copy somewhere safe.
+3. Set the secrets. First generate `DNDM_SECRET` (any random string of 16 or more characters) and store it in your password manager. It is the token encryption key, and Fly can't show a secret again once it is set. If you lose it, you have to regenerate every channel's URLs.
+
+   ```
+   openssl rand -hex 32
+   ```
+
+   Then set everything:
 
    ```
    fly secrets set \
      DATABASE_URL='postgres://…?sslmode=require' \
-     DNDM_SECRET="$(openssl rand -hex 32)" \
+     DNDM_SECRET=<the value from your password manager> \
      DNDM_PUBLIC_URL=https://<app>.fly.dev \
      TWITCH_CLIENT_ID=… \
      TWITCH_CLIENT_SECRET=… \
@@ -53,8 +59,18 @@ It takes you from nothing to a running server on Fly with a Neon database, then 
 4. Deploy:
 
    ```
-   fly deploy
+   fly deploy --ha=false
    ```
+
+   Use `--ha=false` on the first deploy. Fly's docs list `--ha` ("Create spare machines that increases app availability", default true, see the [deploy reference](https://docs.fly.io/flyctl/deploy)), so without it Fly starts two machines. The server needs exactly one: a second copy can't get the Postgres advisory lock and restart-loops. Later plain `fly deploy` runs keep the single machine.
+
+   Then check that only one machine exists:
+
+   ```
+   fly machine list
+   ```
+
+   If it shows two, run `fly scale count 1`.
 
    The release command runs `dndm server migrate` before the new machine starts. A deploy means a few seconds of downtime: there is one machine, and `strategy = "rolling"` takes it down and replaces it.
 
