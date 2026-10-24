@@ -17,7 +17,7 @@ It takes you from nothing to a running server on Fly with a Neon database, then 
 
 1. Create the project.
 2. Copy the **direct** connection string, with `sslmode=require`. Don't use the pooled one: the server holds a Postgres advisory lock, and pooling breaks it.
-3. Optional: to try a risky migration first, create a Neon branch, point `DATABASE_URL` at it, run `dndm server migrate`, and delete the branch afterwards.
+3. Optional: to try a risky migration first, create a Neon branch, point `DATABASE_URL` at it, run `pnpm dndm server migrate`, and delete the branch afterwards.
 
 ## 3. Fly
 
@@ -75,7 +75,7 @@ It takes you from nothing to a running server on Fly with a Neon database, then 
 
    If it shows two, run `fly scale count 1`.
 
-   The release command runs `dndm server migrate` before the new machine starts. A deploy means a few seconds of downtime: there is one machine, and `strategy = "rolling"` takes it down and replaces it.
+   The release command (`server migrate` in `fly.toml`) runs before the new machine starts. A deploy means a few seconds of downtime: there is one machine, and `strategy = "rolling"` takes it down and replaces it.
 
    Note on Fly's docs: for `rolling` they say "One by one, each running Machine is taken down and replaced" ([configuration reference](https://docs.fly.io/reference/configuration)). They describe `bluegreen` as booting a new machine alongside the old one, which `rolling` doesn't do. They don't spell out the single-machine ordering, so watch the first redeploy to confirm it. Don't switch to `bluegreen` or `canary`: the server must not run two copies at once.
 
