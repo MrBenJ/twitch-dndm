@@ -248,6 +248,7 @@ export class Room {
       if (this.watchers.has(id)) continue;
       if (now - (this.touched.get(id) ?? 0) < IDLE_CHARACTER) continue;
       if (this.saved.get(id) !== JSON.stringify(ch)) continue;
+      if (this.broadcasting && this.recordedViews.get(id) !== comparisonView(this.engine, this.game, id, now)) continue;
       delete this.game.characters[id];
       this.saved.delete(id);
       this.recordedViews.delete(id);

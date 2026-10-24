@@ -155,4 +155,16 @@ describe('room.broadcastState() (spec 2b §5.2)', () => {
     expect(s.room.broadcasting).toBe(false);
     await expect(s.room.broadcastState()).rejects.toThrow('broadcastState needs a Room with a Broadcaster');
   });
+  it('the sweep keeps a character with an unbroadcast change, and drops them after broadcastState', async () => {
+    s = await roomSetup({ broadcast: true });
+    await s.cmd(s.dock, { type: 'openSession' });
+    await s.cmd(s.v('al'), { type: 'join', name: 'Al', pick: 'starter:sword' });
+    await s.cmd(s.v('al'), { type: 'leave' });
+    await s.clock.advance(11 * 60_000, () => s.room.idle());
+    await s.room.sweep();
+    expect(s.room.game.characters['dev:al']).toBeDefined();
+    expect((await s.room.broadcastState()).changed).toContain('dev:al');
+    await s.room.sweep();
+    expect(s.room.game.characters['dev:al']).toBeUndefined();
+  });
 });
