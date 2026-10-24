@@ -12,6 +12,13 @@ describe('tokens and secrets (spec 2a §4.3)', () => {
     expect(hashToken(t)).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it('derives stable keys per label', () => {
+    expect(s.derive('snapshot-key')).toEqual(s.derive('snapshot-key'));
+    expect(s.derive('snapshot-key')).toHaveLength(32);
+    expect(s.derive('snapshot-key').equals(s.derive('session'))).toBe(false);
+    expect(new Secrets('another-long-enough-secret').derive('snapshot-key').equals(s.derive('snapshot-key'))).toBe(false);
+  });
+
   it('encrypts so a token can be shown again', () => {
     const box = s.encrypt('hello');
     expect(box).not.toContain('hello');
