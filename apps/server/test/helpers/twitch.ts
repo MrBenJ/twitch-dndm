@@ -63,10 +63,10 @@ export async function closeOnClock(srv: RunningServer, clock: FakeClock): Promis
  * A server with Twitch configured against a fake Twitch, a FakeClock, rate limits on, and one channel with
  * twitch_id 1001. `serverOpts` is merged into the startServer options.
  */
-export async function twitchSetup(o: { serverOpts?: Partial<ServerOpts> } = {}) {
+export async function twitchSetup(o: { serverOpts?: Partial<ServerOpts>; startAt?: number } = {}) {
   const t = await freshDb();
   const fake = await fakeTwitch();
-  const clock = new FakeClock(1_800_000_000_000);
+  const clock = new FakeClock(o.startAt ?? 1_800_000_000_000);
   const bundles = await officialTestBundles();
   const twitch: TwitchConfig = {
     clientId: fake.clientId, clientSecret: 'fake-client-secret', extensionSecret: EXT_SECRET, extensionSecretPrevious: null,
