@@ -35,7 +35,7 @@ export interface View {
     monster: { name: string; image: string | null; hp: number; maxHp: number; statuses: { status: string; until: number | null }[] };
     sub: 'fighting' | 'waiting'; held: boolean; nextTurnAt: number | null;
   };
-  party: { id: string; name: string; hp: number; maxHp: number; knockedOut: boolean; class: string | null }[];
+  party: { id: string; name: string; hp: number; maxHp: number; knockedOut: boolean; class: string | null; level: number; statuses: { status: string; until: number | null }[] }[];
   adventure: null | { id: string; lined: string | null };
 }
 
@@ -110,7 +110,7 @@ export function view(rt: Runtime, characterId: string | null): View {
     } : null,
     party: partyRefs(rt).map((ref) => {
       const c = rt.game.characters[ref.id]!;
-      return { id: c.id, name: c.name, hp: hp(rt, ref), maxHp: maxHp(rt, ref), knockedOut: isKnockedOut(rt, ref), class: classOf(rt, c)?.id ?? null };
+      return { id: c.id, name: c.name, hp: hp(rt, ref), maxHp: maxHp(rt, ref), knockedOut: isKnockedOut(rt, ref), class: classOf(rt, c)?.id ?? null, level: c.level, statuses: statusViews(rt, ref).map((x) => ({ status: x.status, until: x.until })) };
     }),
     adventure: s?.adventure ? { ...s.adventure } : null,
   };
