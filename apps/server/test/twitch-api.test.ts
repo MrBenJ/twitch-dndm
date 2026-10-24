@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeClock } from '../src/clock';
 import type { TwitchConfig } from '../src/config';
 import { HttpTwitchClient, TwitchError } from '../src/twitch/api';
@@ -31,6 +31,40 @@ afterEach(async () => {
 const tokenRequests = () => fake.requests.filter((r) => r.path === '/oauth2/token');
 
 describe('HttpTwitchClient', () => {
+  it('reads or cancels every response body, failures and the retried 401 included', async () => {
+    const real = globalThis.fetch;
+    const responses: Response[] = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args: Parameters<typeof fetch>) => {
+      const res = await real(...args);
+      responses.push(res);
+      return res;
+    });
+    try {
+      const fails = async (p: Promise<unknown>) => { await expect(p).rejects.toBeInstanceOf(TwitchError); };
+      fake.failNext('token');
+      await fails(c.usersById(['1']));
+      await c.usersById(['1']);
+      fake.revokeAppTokens(); // the next Get Users answers 401, then retries with a fresh token
+      await c.usersById(['1']);
+      fake.revokeAppTokens({ always: true });
+      await fails(c.usersById(['1'])); // 401 twice
+      fake.failNext('users');
+      await fails(c.tokenOwner('nope'));
+      await fails(c.tokenOwner('nope')); // 401
+      await fails(c.exchangeCode('bad-code'));
+      fake.failNext('revoke');
+      await fails(c.revoke('t'));
+      await c.revoke('t');
+      fake.failNext('pubsub');
+      expect((await c.sendPubSub('1001', '{}')).ok).toBe(false);
+      expect(responses.length).toBeGreaterThanOrEqual(12);
+      const unread = responses.filter((r) => r.body !== null && !r.bodyUsed).map((r) => `${r.status} ${new URL(r.url).pathname}`);
+      expect(unread).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('gets an app token once and reuses it', async () => {
     await c.usersById(['1']);
     await c.usersById(['1']);

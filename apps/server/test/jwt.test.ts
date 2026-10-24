@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { pubsubJwt, signJwt, verifyExtensionJwt } from '../src/twitch/jwt';
 import type { TwitchConfig } from '../src/config';
@@ -18,11 +19,17 @@ describe('extension JWTs', () => {
   });
   it('refuses the wrong secret', () => expect(verifyExtensionJwt(signJwt(claims, OTHER), [S], now)).toBeNull());
   it('accepts the previous secret', () => expect(verifyExtensionJwt(signJwt(claims, OLD), [S, OLD], now)).not.toBeNull());
-  it('refuses alg other than HS256', () => {
+  it('refuses alg other than HS256, even when the signature is a valid HMAC-SHA256 with the real secret', () => {
+    // Signed exactly as an HS256 token would be, so only the header's alg can make verification fail.
+    const signedAs = (header: Record<string, unknown>) => {
+      const data = `${enc(header)}.${enc(claims)}`;
+      return `${data}.${createHmac('sha256', Buffer.from(S, 'base64')).update(data).digest('base64url')}`;
+    };
+    expect(verifyExtensionJwt(signedAs({ alg: 'HS256', typ: 'JWT' }), [S], now)).not.toBeNull(); // the control
+    expect(verifyExtensionJwt(signedAs({ alg: 'HS512', typ: 'JWT' }), [S], now)).toBeNull();
+    expect(verifyExtensionJwt(signedAs({ alg: 'none', typ: 'JWT' }), [S], now)).toBeNull();
+    expect(verifyExtensionJwt(signedAs({ typ: 'JWT' }), [S], now)).toBeNull();
     expect(verifyExtensionJwt(`${enc({ alg: 'none', typ: 'JWT' })}.${enc(claims)}.`, [S], now)).toBeNull();
-    const h = enc({ alg: 'HS512', typ: 'JWT' });
-    const sig = signJwt(claims, S).split('.')[2]!;
-    expect(verifyExtensionJwt(`${h}.${enc(claims)}.${sig}`, [S], now)).toBeNull();
   });
   it('refuses malformed tokens and payloads', () => {
     expect(verifyExtensionJwt('nope', [S], now)).toBeNull();

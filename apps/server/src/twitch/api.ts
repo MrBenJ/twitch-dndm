@@ -27,6 +27,13 @@ const REFRESH_WITHIN_MS = 10 * 60_000;
 
 interface RawUser { id: string; login: string; display_name: string }
 const toUser = (u: RawUser): TwitchUser => ({ id: u.id, login: u.login, displayName: u.display_name });
+/** Frees a response whose body won't be read, so its connection goes back to the pool. */
+const discard = async (res: Response): Promise<void> => { await res.body?.cancel().catch(() => {}); };
+/** Discards the body and throws, for a status the caller doesn't accept. */
+async function reject(res: Response, message: string): Promise<never> {
+  await discard(res);
+  throw new TwitchError(message);
+}
 
 export class HttpTwitchClient implements TwitchClient {
   private token: { value: string; expiresAt: number } | null = null;
@@ -59,7 +66,7 @@ export class HttpTwitchClient implements TwitchClient {
     const res = await this.form(`${this.cfg.authBase}/token`, {
       client_id: this.cfg.clientId, client_secret: this.cfg.clientSecret, grant_type: 'client_credentials',
     });
-    if (!res.ok) throw new TwitchError(`Twitch app token request returned ${res.status}`);
+    if (!res.ok) await reject(res, `Twitch app token request returned ${res.status}`);
     const body = (await res.json().catch(() => null)) as { access_token?: unknown; expires_in?: unknown } | null;
     if (!body || typeof body.access_token !== 'string' || typeof body.expires_in !== 'number') throw new TwitchError('Twitch app token response malformed');
     this.token = { value: body.access_token, expiresAt: this.clock.now() + body.expires_in * 1000 };
@@ -75,13 +82,16 @@ export class HttpTwitchClient implements TwitchClient {
   /** GET with the app token; a 401 refreshes the token once and retries once. */
   private async appGet(path: string): Promise<Response> {
     let res = await this.helix(path, await this.appToken());
-    if (res.status === 401) res = await this.helix(path, await this.appToken(true));
+    if (res.status === 401) {
+      await discard(res);
+      res = await this.helix(path, await this.appToken(true));
+    }
     return res;
   }
 
   private async users(query: URLSearchParams): Promise<TwitchUser[]> {
     const res = await this.appGet(`/users?${query}`);
-    if (!res.ok) throw new TwitchError(`Twitch Get Users returned ${res.status}`);
+    if (!res.ok) await reject(res, `Twitch Get Users returned ${res.status}`);
     return parseUsers(await res.json().catch(() => null));
   }
 
@@ -97,7 +107,7 @@ export class HttpTwitchClient implements TwitchClient {
 
   async tokenOwner(userToken: string): Promise<TwitchUser> {
     const res = await this.helix('/users', userToken);
-    if (!res.ok) throw new TwitchError(`Twitch Get Users (token owner) returned ${res.status}`);
+    if (!res.ok) await reject(res, `Twitch Get Users (token owner) returned ${res.status}`);
     const [user] = parseUsers(await res.json().catch(() => null));
     if (!user) throw new TwitchError('Twitch returned no user for the token');
     return user;
@@ -115,7 +125,7 @@ export class HttpTwitchClient implements TwitchClient {
       client_id: this.cfg.clientId, client_secret: this.cfg.clientSecret, code, grant_type: 'authorization_code',
       redirect_uri: `${this.cfg.publicUrl}/signup/callback`,
     });
-    if (!res.ok) throw new TwitchError(`Twitch code exchange returned ${res.status}`);
+    if (!res.ok) await reject(res, `Twitch code exchange returned ${res.status}`);
     const body = (await res.json().catch(() => null)) as { access_token?: unknown } | null;
     if (!body || typeof body.access_token !== 'string') throw new TwitchError('Twitch code exchange response malformed');
     return body.access_token;
@@ -123,7 +133,8 @@ export class HttpTwitchClient implements TwitchClient {
 
   async revoke(userToken: string): Promise<void> {
     const res = await this.form(`${this.cfg.authBase}/revoke`, { client_id: this.cfg.clientId, token: userToken });
-    if (!res.ok) throw new TwitchError(`Twitch revoke returned ${res.status}`);
+    if (!res.ok) await reject(res, `Twitch revoke returned ${res.status}`);
+    await discard(res);
   }
 
   async sendPubSub(broadcasterId: string, message: string): Promise<PubSubResult> {
@@ -142,7 +153,7 @@ export class HttpTwitchClient implements TwitchClient {
       const reset = Number(res.headers.get('ratelimit-reset'));
       if (res.headers.get('ratelimit-reset') && Number.isFinite(reset)) retryAt = reset * 1000;
     }
-    await res.body?.cancel().catch(() => {});
+    await discard(res);
     return { ok: false, status: res.status, retryAt };
   }
 }

@@ -74,7 +74,7 @@ describe('dndm server (spec 2a §8.1)', () => {
       stdout, stdin: Readable.from([]), until: Promise.resolve(),
       env: {
         DATABASE_URL: t.url, DNDM_SECRET: SECRET, DNDM_DEV: '1', TWITCH_CLIENT_ID: 'c', TWITCH_CLIENT_SECRET: 's',
-        TWITCH_EXTENSION_SECRET: Buffer.from('x').toString('base64'), TWITCH_OWNER_ID: '1', DNDM_PUBLIC_URL: 'https://x.example',
+        TWITCH_EXTENSION_SECRET: Buffer.alloc(32, 1).toString('base64'), TWITCH_OWNER_ID: '1', DNDM_PUBLIC_URL: 'https://x.example',
       },
     });
     expect(code).toBe(0);
