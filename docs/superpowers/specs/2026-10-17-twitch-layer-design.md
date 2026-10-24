@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 14)
+**Status:** Draft for owner review (revision 15)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -18,7 +18,7 @@
 
 ### 1.1 Success criteria
 
-1. A test viewer holding a JWT signed with the test extension secret can read their view, join, fight and see their state change, entirely through `/ext` routes and snapshots sent to a fake Twitch.
+1. A test viewer holding a JWT signed with the test extension secret can read their view, join, fight and see their state change, entirely through `/ext` routes and snapshots sent to a fake Twitch. The streamer's side (opening a session, starting a fight) goes through the dock routes, as in criterion 2.
 2. Project 1's golden scripts, with viewer lines replayed through `/ext` as Twitch viewers (streamer lines through the dock routes) with signed JWTs and a fake clock, give the same events as `dndm run` with the same seed, apart from character ID prefixes (`twitch:` here). The test's fake Twitch answers Get Users for each script viewer with the name the script uses for them, so display names match too. This is 2a's criterion 2, carried to the real viewer path.
 3. No snapshot ever contains an event, an encounter panel or an overlay scene, so the content of any restricted encounter (its events and panels; for a secret shop, its goods, its prices and what was bought) can't leak through the broadcast. The encounter's own events, and reactions to them (§5.7), don't reach the overlay's event feed either. This protects the content only, not party state or that a member did something in the encounter. Party state is public like any other party state, even while the encounter is still running (§5.1): HP, knockouts and statuses the encounter itself changes, and using what was bought, with its visible effects (a party member's class or HP in `p`, the roster and `/ext/party`) and its events (equipping or using the item, which name it on the overlay's event feed). A snapshot may still show that an encounter is running (`ph`) and which viewers' own state changed (`ch`). For a party member, whose key the roster maps to their identity, `ch` during a secret shop shows that they did something there, usually a purchase, but not what. This is accepted (§5.1).
 4. A streamer on the allowlist can sign in with Twitch, gets a channel, and sees the dock and overlay URLs. A streamer not on the allowlist is turned away.
@@ -83,6 +83,7 @@ The Room, RoomManager and Hub keep their 2a jobs. The Room gains the two small a
 - 2a README decision 3 left reaction events inside a restricted encounter public, which 2a spec §7.2 didn't allow. 2b fixes the engine to match §7.2 (§5.7), and decision 3 no longer applies.
 - Rev 7 §7.2 sends a snapshot "only when state changed". The first Broadcaster for a channel since the process started always sends an `rf`, even when nothing changed, because changes may have been lost across a restart (§5.3).
 - On 2a's viewer path, a config change sends a `config-changed` message, and clients refetch after a random 0–1 s delay. On the Twitch path, a config change becomes an `rf` snapshot with `rw` = 30 s (§5.3, §5.5). The 2a `config-changed` message stays for dev viewers, the dock and the overlay.
+- Rev 7 §7.2 replaces a changed list that doesn't fit with `refreshAll`. 2b sends the keys that fit and carries the rest to the next send, and sends an `rf` only once more than 3,000 keys are waiting (§5.3, §5.4).
 - 2a's viewer role row (§4.3) said the extension JWT would be used in 2b. The JWT is used only on the `/ext` routes (§4.1). On the 2a `/channels/:channel/*` routes, the viewer role stays dev login only.
 - Rev 7 §1.2 said "Any streamer can sign up". 2b's default is invite-only through the allowlist (§4.3), and `DNDM_SIGNUP=open` restores open sign-up.
 - 2a §1.2 and the engine spec put media uploads, the optional chat bot and the paid-pack "official" redefinition in Project 2. Media uploads move to Project 3, the chat bot (with chat bans) becomes its own project after Project 3, and the paid-pack redefinition waits for the first paid pack (§1.2, §11.2). Until media uploads exist, monster images stay as pack content provides them (or none).
@@ -113,7 +114,7 @@ Twitch characters are `twitch:<user_id>`, following 2a's rule that character IDs
   - Any failure answers `unauthorized` (401).
 - **The channel** is found by matching the JWT's `channel_id` to `channels.twitch_id`. No match answers `unknown-channel` (404) with the message "This streamer hasn't set up the game yet." (rev 7 §8).
 - **With identity shared** (the JWT has `user_id`), the sender is the viewer `twitch:<user_id>`. They may read their own view and send viewer commands as themselves only, under the same rule as 2a's viewer role.
-- **Without identity shared** (only `opaque_user_id`), reads return the public view, and every command answers `identity-required` (403), a new error code, so the extension knows to ask the viewer to share their identity.
+- **Without identity shared** (only `opaque_user_id`), `/ext/view` returns the public view, the other reads (`/ext/describe`, `/ext/roster`, `/ext/party`) answer as for anyone (§5.6), and every command answers `identity-required` (403), a new error code, so the extension knows to ask the viewer to share their identity.
 - **Rate limits** use 2a's viewer budget (5 per second). The key is the character ID, or the `opaque_user_id` when there's no `user_id`.
 - **The JWT's role.** A `broadcaster` or `moderator` role is treated like any other viewer. Streamer control stays with the dock token in 2b.
 - **CORS.** The `/ext` routes allow the extension's origin, `https://<TWITCH_CLIENT_ID>.ext-twitch.tv`, with the `Authorization` and `Content-Type` headers. Other origins get no CORS headers.
@@ -232,7 +233,8 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
 - **What it sends.** A snapshot is sent when its content (everything but `t` and `rw`) differs from the last one sent, or its changed list isn't empty, or an `rf` is due (below). A due `rf` is always sent, even when nothing changed. Otherwise nothing is sent.
 - **Config changes.** The snapshot carries `cv`, the channel's `config_version`. A config change moves it, so the next tick sends a snapshot. This stands in for 2a's `config-changed` message on the viewer path.
 - **Keys are kept until delivered.** The changed list is every key from `broadcastState()` since the last successful send that hasn't been delivered yet. A failed send keeps its keys for the next one, and so does a send that can't fit them all (§5.4).
-- **The backlog cap.** If more than 3,000 keys are waiting when a send is built (30 s at §5.5's target of 100 a second), that send is an `rf`, and the waiting keys are cleared once it succeeds.
+- **The backlog cap.** If more than 3,000 keys are waiting when a send is built (30 s at §5.5's target of 100 a second), that send is an `rf`.
+- **An `rf` clears the waiting keys.** A successful `rf` of any kind (§5.3 triggers, the backlog cap, or §5.4's bare fallback) clears every waiting key, because it already tells every viewer to fetch.
 - **The roster version.** The Broadcaster keeps the roster it last computed: each party member's ID, name, class and level, in join order, taken from the public view's party entries. `rv` goes up by one whenever the newly computed roster differs from it. It starts at 1 when a Broadcaster starts. Clients refetch the roster when `rv` or `e` is different from what they hold, after a random delay in `[0, rw]`. Because `e` is new with every Broadcaster, a lost update before a restart can't leave a client holding a roster with a matching `rv`.
 - **Shared reads are cached.** `/ext/roster`, `/ext/describe` and the public view that `/ext/view` gives viewers without identity are the same for every viewer of a channel. The server builds each one once, per (`e`, `rv`), per `cv`, or per Room `inputs` value, and serves that copy to every viewer. These audience-wide fetches are spread by `rw`, but they aren't counted in §5.5's own-state target, because each costs a cache lookup, not a Room read.
 - **When a send is an `rf`.** A Broadcaster's next send is an `rf` whenever one of these is due, and it goes out on the first tick after it becomes due, whether or not anything changed:
@@ -250,7 +252,7 @@ The snapshot is serialized and measured in bytes. Over 5 KB, in this order:
 
 1. Trim `p` to the first members by join order that fit, and add `pt`.
 2. If it still doesn't fit with `p` empty, keep in `ch` the longest-waiting keys that fit, and carry the rest to the next send (§5.3). The backlog cap (§5.3) turns a growing backlog into an `rf`.
-3. If it still doesn't fit with `ch` empty too (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it.
+3. If it still doesn't fit with `ch` empty too (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it. While snapshots keep not fitting (the cause usually lasts, such as a monster name for a whole fight), this bare `rf` goes out at most once every 30 s, and only when something changed since the last one. Viewers' public state can then be up to 30 s old, a known limit (§5.5).
 
 In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that gets it keeps its current roster, unless `e` changed, in which case the `e` rule applies (it refetches the roster). It takes the public state (phase, fight, party, adventure) from a `/ext/view` fetch, made after a random delay in `[0, rw]`: its own view with identity, or the cached public view (§5.3) without. Every field other than `v`, `e`, `t`, `rw` and `cv` is optional in the format, and absence means "not in this snapshot", never null.
 
@@ -263,11 +265,12 @@ In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that get
 
 The server sets it, so it can be tuned without an extension update.
 
-**A known load risk.** A long changed list or `rf` comes from changes that touch many viewers' own state at once: an encounter starting or ending (every member's panel changes), a fight starting or ending (abilities' readiness flips), a fight's rewards, a config change (`rf`), a pack whose panel shows shared state, or a pack whose `canUse` or stat modifiers read shared state. Otherwise the comparison view (§5.2) keeps public changes, such as an overlay tally or monster HP, out of `changed`. The **target** is about 100 own-state requests per second per channel for the fetches one send triggers (fetching viewers ÷ window). It holds for one send while the fetching viewers number up to about 3,000. Two known limits, not guarantees:
+**A known load risk.** A long changed list or `rf` comes from changes that touch many viewers' own state at once: an encounter starting or ending (every member's panel changes), a fight starting or ending (abilities' readiness flips), a fight's rewards, a config change (`rf`), a pack whose panel shows shared state, or a pack whose `canUse` or stat modifiers read shared state. Otherwise the comparison view (§5.2) keeps public changes, such as an overlay tally or monster HP, out of `changed`. The **target** is about 100 own-state requests per second per channel for the fetches one send triggers (fetching viewers ÷ window). It holds for one send while the fetching viewers number up to about 3,000. Four known limits, not guarantees:
 
 - **Beyond about 3,000 fetching viewers**, the 30 s cap wins and the rate rises above the target.
 - **Windows overlap.** Each send sizes `rw` from its own keys only, and sends can go out every second. In a long fight where more than 100 keys change every second, the rate follows the number of changed keys per second instead (roughly 300 a second with 3,000 active members, from Attack's 10 s cooldown and monster turns hitting many targets). An `rf` that lands inside another `rf`'s 30 s window doubles the `rf` rate while they overlap.
 - **More changes than fit.** About 365 keys fit in one snapshot. If more keys than that change every second for a long stretch, the backlog grows until it passes the cap, and the channel gets an `rf` every so often.
+- **Snapshots that never fit.** While snapshots don't fit even without `p` and `ch` (§5.4 step 3), a bare `rf` goes out at most once every 30 s, so viewers' public state (fight, party) can be up to 30 s old.
 
 An acting viewer's own key stays in `ch` even though their `/ext/commands` answer carried their view, because a timer can change their state again before the next send. The constants live in one place, so they can be tuned.
 
@@ -457,7 +460,9 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - the first Broadcaster for a channel after a restart sends `rf`, at boot or on a later load;
   - the unload's last `broadcastState()` runs before the Room closes;
   - at 5 KB (§5.4): trimming `p`, carrying keys that don't fit to the next send, and the bare fallback;
-  - more than 3,000 waiting keys (from overflow or failed sends) makes the next send an `rf` and clears them once it succeeds;
+  - more than 3,000 waiting keys (from overflow or failed sends) makes the next send an `rf`; any successful `rf` clears waiting keys;
+  - while snapshots never fit, the bare `rf` goes out at most once every 30 s, and only after a change;
+  - `/ext/roster`, `/ext/party` and `/ext/describe` answer a JWT without `user_id`;
   - the `rw` values;
   - the last tick on unload;
   - **a secret shop's content never appears in any snapshot**, while a member who equips a bought item mid-shop changes their `p` entry and `rv` (criterion 3);
