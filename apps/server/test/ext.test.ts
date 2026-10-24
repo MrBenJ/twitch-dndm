@@ -146,9 +146,11 @@ describe('/ext routes (spec 2b §4.1, §4.2, §5.6)', () => {
     expect(pre.headers['access-control-allow-origin']).toBe(origin);
     expect(pre.headers['access-control-allow-headers']).toBe('Authorization, Content-Type');
     expect(pre.headers['access-control-allow-methods']).toBe('GET, POST');
+    expect(pre.headers['access-control-max-age']).toBe('7200');
     const preEvil = await x.srv.app.inject({ method: 'OPTIONS', url: '/ext/commands', headers: { origin: 'https://evil.example' } });
     expect(preEvil.headers['access-control-allow-origin']).toBeUndefined();
     expect(preEvil.headers['access-control-allow-headers']).toBeUndefined();
+    expect(preEvil.headers['access-control-max-age']).toBeUndefined();
   }, T);
 
   it('command answers carry view and key, on success and on engine rejection', async () => {

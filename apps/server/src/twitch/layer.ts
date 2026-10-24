@@ -105,6 +105,11 @@ export class TwitchLayer implements RoomHooks {
       b.stop();
       throw e;
     }
+    // shutdown() ran while it started: it has already taken the entries, so this one would never be stopped.
+    if (this.closed) {
+      b.stop();
+      throw new Error('The Twitch layer has shut down');
+    }
     // Only a started Broadcaster counts: one that failed to start sent nothing, so the next is still the first.
     this.started.add(channelId);
     this.entries.set(channelId, { room, broadcaster: b });
@@ -119,6 +124,9 @@ export class TwitchLayer implements RoomHooks {
     const entry = this.entries.get(channelId);
     if (!entry || entry.room !== room) { room.close(); return; }
     this.entries.delete(channelId);
+    this.descriptions.delete(channelId);
+    this.rosters.delete(channelId);
+    this.publicViews.delete(room);
     const twitchId = room.channel.twitchId!;
     let send: (retryUntil: number | null) => Promise<boolean>;
     try {

@@ -4,9 +4,11 @@ import { Secrets } from '../src/crypto';
 import type { Answer } from '@dndm/protocol';
 import { IDLE_ROOM, type Room, RoomClosedError } from '../src/room';
 import { createChannel, defaultConfig, startServer } from '../src/server';
+import { HttpTwitchClient } from '../src/twitch/api';
+import { TwitchLayer } from '../src/twitch/layer';
 import { freshDb } from './helpers/db';
 import { officialTestBundles, SECRET } from './helpers/room';
-import { closeOnClock, twitchSetup } from './helpers/twitch';
+import { closeOnClock, EXT_SECRET, twitchSetup } from './helpers/twitch';
 
 const T = 20_000; // per-test timeout, so a hang fails fast
 const UNLOAD = IDLE_ROOM + 60_000; // idle long enough for the sweeper to unload a Room
@@ -97,6 +99,43 @@ describe('TwitchLayer (spec 2b §5.3, §7.4)', () => {
     expect(sent[n]).toMatchObject({ e: again.epoch, ch: [] });
     expect(sent[n]!.ph).not.toBe('closed');
     expect(sent[n]!.rf).toBeUndefined();
+  }, T);
+
+  it('an unload prunes the channel\'s describe and roster caches', async () => {
+    s = await twitchSetup();
+    const layer = s.srv.layer!;
+    const caches = layer as unknown as { descriptions: Map<string, unknown>; rosters: Map<string, unknown> };
+    const room = (await s.srv.manager.get(s.channelId))!;
+    layer.describe(room);
+    expect(layer.roster(s.channelId)).not.toBeNull();
+    expect(caches.descriptions.has(s.channelId)).toBe(true);
+    expect(caches.rosters.has(s.channelId)).toBe(true);
+    await s.advance(UNLOAD);
+    expect(room.closed).toBe(true);
+    expect(caches.descriptions.has(s.channelId)).toBe(false);
+    expect(caches.rosters.has(s.channelId)).toBe(false);
+  }, T);
+
+  it('an attach still starting when the layer shuts down stops its Broadcaster and fails', async () => {
+    s = await twitchSetup();
+    const x = s;
+    const room = (await x.srv.manager.get(x.channelId))!;
+    // A second layer over the same Room, so the attach can race its own shutdown.
+    const config = {
+      clientId: x.fake.clientId, clientSecret: 'fake-client-secret', extensionSecret: EXT_SECRET, extensionSecretPrevious: null,
+      ownerId: '999', publicUrl: 'https://dndm.example', apiBase: x.fake.apiBase, authBase: x.fake.authBase,
+    };
+    const layer = new TwitchLayer({ config, client: new HttpTwitchClient(config, x.clock), clock: x.clock, secrets: x.srv.secrets });
+    const attaching = layer.attach(room);
+    attaching.catch(() => {});
+    await layer.shutdown(1000);
+    await expect(attaching).rejects.toThrow('The Twitch layer has shut down');
+    expect(layer.broadcaster(x.channelId)).toBeUndefined();
+    // A leaked Broadcaster would be its channel's first since start and send an rf on its first tick.
+    await x.advance(5000);
+    const mine = x.srv.layer!.broadcaster(x.channelId)!.epoch;
+    expect(x.snapshots().length).toBeGreaterThan(0);
+    expect(x.snapshots().filter((m) => m.e !== mine)).toEqual([]);
   }, T);
 
   it('e is new with every Broadcaster', async () => {

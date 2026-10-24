@@ -60,6 +60,7 @@ export function registerExt(app: FastifyInstance, deps: ExtDeps): void {
       if (req.headers.origin === extOrigin) {
         res.header('access-control-allow-headers', 'Authorization, Content-Type');
         res.header('access-control-allow-methods', 'GET, POST');
+        res.header('access-control-max-age', '7200');
       }
       return res.code(204).send();
     });
