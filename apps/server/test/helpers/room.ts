@@ -6,19 +6,36 @@ import { createChannel, defaultConfig, officialBundles } from '../../src/server'
 import { Store } from '../../src/store';
 import { freshDb } from './db';
 
-let bundles: PackBundle[] | null = null;
+let official: PackBundle[] | null = null;
+
+/** The official bundles, loaded once. */
+export async function officialTestBundles(): Promise<PackBundle[]> {
+  official ??= await officialBundles();
+  return official;
+}
+
 export const SECRET = 'test-secret-0123456789';
 
-export async function roomSetup(opts: { settings?: Record<string, unknown>; seed?: number } = {}) {
+export async function roomSetup(opts: {
+  settings?: Record<string, unknown>; seed?: number;
+  /** A Room with a Broadcaster (spec 2b §5.2). */
+  broadcast?: boolean;
+  /** Replaces the official bundles, and the channel enables every one of them. */
+  bundles?: PackBundle[];
+} = {}) {
   const t = await freshDb();
   const store = new Store(t.db, t.sql);
   const clock = new FakeClock(0);
   const secrets = new Secrets(SECRET);
-  bundles ??= await officialBundles();
-  const base = defaultConfig() as { settings?: Record<string, unknown> };
-  const config = { ...base, settings: { ...(base.settings ?? {}), ...(opts.settings ?? {}) } };
+  const bundles = opts.bundles ?? (await officialTestBundles());
+  const base = defaultConfig() as { packs?: string[]; settings?: Record<string, unknown> };
+  const config = {
+    ...base,
+    ...(opts.bundles ? { packs: opts.bundles.map((b) => b.manifest.id) } : {}),
+    settings: { ...(base.settings ?? {}), ...(opts.settings ?? {}) },
+  };
   const made = await createChannel({ store, secrets, bundles, name: 'test', config, seed: opts.seed ?? 1 });
-  const deps: RoomDeps = { store, clock, secrets, bundles };
+  const deps: RoomDeps = { store, clock, secrets, bundles, ...(opts.broadcast ? { broadcast: () => true } : {}) };
   let room = (await Room.load(made.id, deps))!;
   const out: RoomOutput[] = [];
   let unsub = room.subscribe((o) => out.push(o));
@@ -38,6 +55,8 @@ export async function roomSetup(opts: { settings?: Record<string, unknown>; seed
       unsub = room.subscribe((o) => out.push(o));
       return room;
     },
+    /** Stops the helper listening, so the Room can unload. */
+    unsubscribe() { unsub(); },
     events: () => out.flatMap((o) => (o.type === 'events' ? o.events : [])),
     async done() { room.close(); await t.drop(); },
   };
