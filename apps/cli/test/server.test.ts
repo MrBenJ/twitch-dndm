@@ -81,6 +81,25 @@ describe('dndm server (spec 2a §8.1)', () => {
     expect(out).toContain('DNDM_DEV=1 with Twitch configured');
   });
 
+  it('start reads DNDM_SIGNUP: allowlist or open, anything else is refused', async () => {
+    const env = {
+      DATABASE_URL: t.url, DNDM_SECRET: SECRET, TWITCH_CLIENT_ID: 'c', TWITCH_CLIENT_SECRET: 's',
+      TWITCH_EXTENSION_SECRET: Buffer.alloc(32, 1).toString('base64'), TWITCH_OWNER_ID: '1', DNDM_PUBLIC_URL: 'https://x.example',
+    };
+    const bad = await cli(['server', 'start', '--port', '0'], { ...env, DNDM_SIGNUP: 'everyone' });
+    expect(bad.code).toBe(2);
+    expect(bad.out).toContain('DNDM_SIGNUP must be allowlist or open');
+    for (const mode of ['allowlist', 'open', undefined]) {
+      const stdout = new PassThrough();
+      let out = '';
+      stdout.on('data', (c) => { out += String(c); });
+      const code = await main(['server', 'start', '--port', '0'], {
+        stdout, stdin: Readable.from([]), until: Promise.resolve(), env: { ...env, DNDM_SIGNUP: mode },
+      });
+      expect(code, out).toBe(0);
+    }
+  });
+
   describe('allowlist', () => {
     const user = { id: '42', login: 'streamer', displayName: 'Streamer' };
     const TW = { DATABASE_URL: '', DNDM_SECRET: SECRET, TWITCH_CLIENT_ID: 'c', TWITCH_CLIENT_SECRET: 's' };

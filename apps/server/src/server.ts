@@ -7,6 +7,8 @@ import { STATE_VERSION } from './room';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app';
 import { registerExt } from './ext';
+import { Cookies } from './session';
+import { registerSignup, type SignupMode } from './signup';
 import { RateLimiter } from './auth';
 import { type Clock, realClock } from './clock';
 import { Hub } from './hub';
@@ -59,6 +61,8 @@ export interface ServerOpts {
   twitch?: TwitchConfig;
   /** Replaces the HTTP Twitch client (tests). */
   twitchClient?: TwitchClient;
+  /** Who may sign up with Twitch (spec 2b §4.3): allowlisted accounts only (the default), or anyone. */
+  signup?: SignupMode;
 }
 export interface RunningServer {
   app: FastifyInstance; manager: RoomManager; hub: Hub; store: Store; secrets: Secrets; url: string;
@@ -93,6 +97,10 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     app = await buildApp({ manager, hub, secrets, limiter, dev: !!opts.dev, health, log: opts.log });
     if (opts.twitch && layer && client) {
       registerExt(app, { manager, layer, store, limiter, config: opts.twitch, client, clock, ...(opts.log ? { log: opts.log } : {}) });
+      registerSignup(app, {
+        store, manager, secrets, cookies: new Cookies(secrets), client, config: opts.twitch, signup: opts.signup ?? 'allowlist', bundles,
+        clock, ...(opts.log ? { log: opts.log } : {}),
+      });
     }
     const running = app;
     const url = opts.port !== undefined ? await app.listen({ port: opts.port, host: opts.host ?? '127.0.0.1' }) : '';

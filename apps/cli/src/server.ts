@@ -90,9 +90,11 @@ export async function serverCli(sub: string | undefined, args: string[], o: Serv
       const dev = o.env.DNDM_DEV === '1';
       let twitch: ReturnType<typeof readTwitchConfig>;
       try { twitch = readTwitchConfig(o.env); } catch (e) { throw new CliError((e as Error).message); }
+      const signup = o.env.DNDM_SIGNUP ?? 'allowlist';
+      if (signup !== 'allowlist' && signup !== 'open') throw new CliError('DNDM_SIGNUP must be allowlist or open');
       if (twitch && dev) say('warning', 'DNDM_DEV=1 with Twitch configured: dev login is on');
       const srv = await startServer({
-        databaseUrl: need(o.env, 'DATABASE_URL'), secret: need(o.env, 'DNDM_SECRET'), dev, port, host: o.host, twitch: twitch ?? undefined,
+        databaseUrl: need(o.env, 'DATABASE_URL'), secret: need(o.env, 'DNDM_SECRET'), dev, port, host: o.host, twitch: twitch ?? undefined, signup,
         log: (msg, extra) => o.write(JSON.stringify({ kind: 'log', text: msg, ...extra })),
       });
       say('note', `dndm server listening on ${srv.url}${dev ? ' (dev login on)' : ''}`, { url: srv.url });
