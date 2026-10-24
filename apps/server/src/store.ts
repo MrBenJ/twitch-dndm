@@ -1,7 +1,7 @@
 import type { Character, SessionState } from '@dndm/engine';
-import { and, eq, inArray, isNotNull, or, sql as dsql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, or, sql as dsql } from 'drizzle-orm';
 import { connect, type Db, type Sql } from './db/connect';
-import { channels, characters, type RecentRequest, rooms } from './db/schema';
+import { allowlist, channels, characters, type RecentRequest, rooms } from './db/schema';
 
 export interface ChannelRow {
   id: string; name: string; config: Record<string, unknown>; configVersion: number;
@@ -132,6 +132,30 @@ export class Store {
       union
       select distinct channel_id from characters where wake_at is not null`);
     return [...rows].map((r) => r.channel_id);
+  }
+
+  async allow(twitchId: string, login: string): Promise<void> {
+    await this.db.insert(allowlist).values({ twitchId, login })
+      .onConflictDoUpdate({ target: allowlist.twitchId, set: { login } });
+  }
+
+  async disallowById(twitchId: string): Promise<boolean> {
+    const rows = await this.db.delete(allowlist).where(eq(allowlist.twitchId, twitchId)).returning({ id: allowlist.twitchId });
+    return rows.length > 0;
+  }
+
+  async disallowByLogin(login: string): Promise<boolean> {
+    const rows = await this.db.delete(allowlist).where(eq(allowlist.login, login)).returning({ id: allowlist.twitchId });
+    return rows.length > 0;
+  }
+
+  async allowlist(): Promise<{ twitchId: string; login: string; addedAt: Date }[]> {
+    return this.db.select().from(allowlist).orderBy(asc(allowlist.addedAt), asc(allowlist.twitchId));
+  }
+
+  async isAllowed(twitchId: string): Promise<boolean> {
+    const rows = await this.db.select({ id: allowlist.twitchId }).from(allowlist).where(eq(allowlist.twitchId, twitchId));
+    return rows.length > 0;
   }
 
   /** Spec 2a §6.6: one server per database. Held on a dedicated connection until close(). */

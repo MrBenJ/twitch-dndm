@@ -6,4 +6,4 @@ export { createChannel, defaultConfig, officialBundles, startServer, type Runnin
 export { readTwitchConfig, TWITCH_API_BASE, TWITCH_AUTH_BASE, type TwitchConfig } from './config';
 export { RoomManager, type RoomHooks } from './room-manager';
 export { TwitchLayer } from './twitch/layer';
-export { HttpTwitchClient, type TwitchClient } from './twitch/api';
+export { HttpTwitchClient, TwitchError, type TwitchClient, type TwitchUser } from './twitch/api';
