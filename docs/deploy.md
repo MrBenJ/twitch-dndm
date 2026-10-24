@@ -41,17 +41,20 @@ It takes you from nothing to a running server on Fly with a Neon database, then 
    openssl rand -hex 32
    ```
 
-   Then set everything:
+   Then put everything in a temporary file, import it, and delete the file. Quote every value:
 
    ```
-   fly secrets set \
-     DATABASE_URL='postgres://…?sslmode=require' \
-     DNDM_SECRET=<the value from your password manager> \
-     DNDM_PUBLIC_URL=https://<app>.fly.dev \
-     TWITCH_CLIENT_ID=… \
-     TWITCH_CLIENT_SECRET=… \
-     TWITCH_EXTENSION_SECRET=… \
-     TWITCH_OWNER_ID=…
+   cat > /tmp/dndm.env <<'EOF'
+   DATABASE_URL='postgres://…?sslmode=require'
+   DNDM_SECRET='<the value from your password manager>'
+   DNDM_PUBLIC_URL='https://<app>.fly.dev'
+   TWITCH_CLIENT_ID='…'
+   TWITCH_CLIENT_SECRET='…'
+   TWITCH_EXTENSION_SECRET='…'
+   TWITCH_OWNER_ID='…'
+   EOF
+   fly secrets import < /tmp/dndm.env
+   rm /tmp/dndm.env
    ```
 
    `DNDM_SIGNUP` defaults to `allowlist`, so only people you allow can sign up. Leave it unset.
@@ -74,7 +77,7 @@ It takes you from nothing to a running server on Fly with a Neon database, then 
 
    The release command runs `dndm server migrate` before the new machine starts. A deploy means a few seconds of downtime: there is one machine, and `strategy = "rolling"` takes it down and replaces it.
 
-   What I checked in Fly's docs: for `rolling` they say "One by one, each running Machine is taken down and replaced" ([configuration reference](https://docs.fly.io/reference/configuration)). They describe `bluegreen` as booting a new machine alongside the old one, which `rolling` doesn't do. They do not spell out the single-machine ordering. I could not confirm it more explicitly than that, so watch the first redeploy to see it happen. Don't switch to `bluegreen` or `canary`: the server must not run two copies at once.
+   Note on Fly's docs: for `rolling` they say "One by one, each running Machine is taken down and replaced" ([configuration reference](https://docs.fly.io/reference/configuration)). They describe `bluegreen` as booting a new machine alongside the old one, which `rolling` doesn't do. They don't spell out the single-machine ordering, so watch the first redeploy to confirm it. Don't switch to `bluegreen` or `canary`: the server must not run two copies at once.
 
 The app stops on SIGTERM and gets 30 seconds to finish (`kill_timeout = 30`).
 
@@ -83,10 +86,12 @@ The app stops on SIGTERM and gets 30 seconds to finish (`kill_timeout = 30`).
 Allow yourself against production, then sign up in a browser:
 
 ```
-fly ssh console -C "node_modules/.bin/tsx apps/cli/src/main.ts server allow <login>"
+fly ssh console -C "/app/node_modules/.bin/tsx /app/apps/cli/src/main.ts server allow <login>"
 ```
 
-Or run `dndm server allow <login>` locally with `DATABASE_URL` set to the production string. Then open `https://<app>.fly.dev` and sign up with Twitch.
+Or, from a checkout of the repo on your laptop, run `pnpm dndm server allow <login>` with `DATABASE_URL`, `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` set to the production values. That puts production credentials on the laptop, so prefer the `fly ssh` command. There is no `dndm` binary: it is always `pnpm dndm` from a checkout.
+
+Then open `https://<app>.fly.dev/signup` (there is no page at `/`) and sign in with Twitch.
 
 ## 5. Rotating secrets
 
@@ -96,13 +101,15 @@ Or run `dndm server allow <login>` locally with `DATABASE_URL` set to the produc
 3. `fly secrets set TWITCH_EXTENSION_SECRET=<the new secret>`, then `fly deploy` if it didn't restart.
 4. Later, once old tokens have expired, `fly secrets unset TWITCH_EXTENSION_SECRET_PREVIOUS`.
 
-**`DNDM_SECRET`.** This changes the token encryption key, so every existing channel URL stops working. After changing it, each streamer must regenerate their URLs from `/setup`.
+**`DNDM_SECRET`.** This changes the token encryption key. Stored tokens can no longer be decrypted, so `/setup` shows "This URL can't be shown because the server's key changed. Regenerate it." in place of each URL, and the streamer regenerates from `/setup` (or the dock). Sessions signed with the old key are invalid, so streamers sign in again first.
+
+Rotation does not revoke anything by itself: the lookup hash of a token is unkeyed, so the old dock and overlay URLs keep working until each one is regenerated. If you rotated because of a leak, the rotation is incomplete until every channel has regenerated both URLs.
 
 ## 6. The live check
 
 This is the final acceptance test. It needs the real Twitch console and your Fly account, so only you can run it.
 
 1. `GET https://<app>.fly.dev/health` returns 200.
-2. `dndm server allow <owner-login>` resolves through the real Get Users call.
+2. `fly ssh console -C "/app/node_modules/.bin/tsx /app/apps/cli/src/main.ts server allow <owner-login>"` (or `pnpm dndm server allow <owner-login>` from a checkout, see step 4) resolves through the real Get Users call.
 3. The owner signs up through real Twitch and sees both URLs on `/setup`. The install link opens the extension's page.
-4. `dndm connect <url> --channel <id> --dock <token>`, then `openSession`, produces a logged PubSub send answered 204.
+4. Install the extension on the owner's channel (the install link from step 3), then from a checkout run `pnpm dndm connect <url> --channel <id> --dock <token>` and send `openSession`. The proof is in `fly logs`: a JSON line with the message `pubsub send delivered` and `"status":204`.
