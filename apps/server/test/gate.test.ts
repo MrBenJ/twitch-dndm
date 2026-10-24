@@ -83,17 +83,39 @@ describe('PacingGate', () => {
     expect(await p).toBe(false);
   });
 
-  it('idle resolves when nothing is queued or running', async () => {
-    const { clock, gate, attempt } = setup();
-    void gate.send('1', attempt());
-    void gate.send('1', attempt());
+  it('idle as the FakeClock settle does not deadlock on queued sends', async () => {
+    const { clock, gate, times, attempt } = setup();
+    for (let i = 0; i < 3; i++) void gate.send('1', attempt());
+    await clock.advance(5000, () => gate.idle());
+    expect(times).toEqual([0, 1000, 2000]);
+  }, 2000);
+
+  it('idle resolves immediately while a send is parked on a 30 s backoff', async () => {
+    const { clock, gate, times, attempt } = setup();
+    const results: PubSubResult[] = [{ ok: false, status: 429, retryAt: 30_000 }];
+    const first = gate.send('1', attempt(results));
+    const second = gate.send('1', attempt(results));
+    await gate.idle();
+    expect(times).toEqual([0]);
+    await gate.idle();
+    await clock.advance(30_000, () => gate.idle());
+    expect(times).toEqual([0, 30_000]);
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+  }, 2000);
+
+  it('idle stays pending while an attempt is unresolved', async () => {
+    const { gate } = setup();
+    let release!: (r: PubSubResult) => void;
+    void gate.send('1', () => new Promise<PubSubResult>((r) => { release = r; }));
     let idle = false;
     void gate.idle().then(() => { idle = true; });
-    await clock.advance(0, flush);
+    await flush();
     expect(idle).toBe(false);
-    await clock.advance(1000, flush);
+    release(OK);
+    await flush();
     expect(idle).toBe(true);
-  });
+  }, 2000);
 
   it('dropped keys are remembered until cleared', () => {
     const { gate } = setup();

@@ -11,6 +11,10 @@ interface Channel {
   /** No attempt may start before this (429 retryAt and failure backoff). */
   notBefore: number;
   failures: number;
+  /** Sends queued or running for this channel. */
+  outstanding: number;
+  /** The head send is parked on a future clock timer. */
+  parked: boolean;
 }
 
 /**
@@ -20,7 +24,7 @@ interface Channel {
 export class PacingGate {
   private channels = new Map<string, Channel>();
   private dropped = new Set<string>();
-  private pending = new Set<Promise<unknown>>();
+  private watchers: (() => void)[] = [];
 
   constructor(private clock: Clock) {}
 
@@ -31,14 +35,15 @@ export class PacingGate {
   send(twitchId: string, attempt: () => Promise<PubSubResult>, opts: { retryUntil?: number } = {}): Promise<boolean> {
     let ch = this.channels.get(twitchId);
     if (!ch) {
-      ch = { tail: Promise.resolve(), lastAttemptAt: -Infinity, notBefore: -Infinity, failures: 0 };
+      ch = { tail: Promise.resolve(), lastAttemptAt: -Infinity, notBefore: -Infinity, failures: 0, outstanding: 0, parked: false };
       this.channels.set(twitchId, ch);
     }
     const channel = ch;
-    const result = channel.tail.then(() => this.run(channel, attempt, opts.retryUntil));
+    channel.outstanding += 1;
+    const result = channel.tail
+      .then(() => this.run(channel, attempt, opts.retryUntil))
+      .finally(() => { channel.outstanding -= 1; this.notify(); });
     channel.tail = result;
-    this.pending.add(result);
-    void result.finally(() => this.pending.delete(result));
     return result;
   }
 
@@ -46,16 +51,31 @@ export class PacingGate {
   hasDropped(twitchId: string): boolean { return this.dropped.has(twitchId); }
   clearDropped(twitchId: string): void { this.dropped.delete(twitchId); }
 
-  /** Resolves when no send is queued or running. */
+  /**
+   * Resolves when no attempt is in flight and no send is ready to run right now. Sends parked on a
+   * future clock timer do not keep it pending; once such a timer fires, the send is ready again and
+   * a later idle() waits for its attempt to finish.
+   */
   async idle(): Promise<void> {
-    while (this.pending.size > 0) await Promise.allSettled([...this.pending]);
+    while (this.busy()) await new Promise<void>((resolve) => { this.watchers.push(resolve); });
+  }
+
+  private busy(): boolean {
+    for (const ch of this.channels.values()) if (ch.outstanding > 0 && !ch.parked) return true;
+    return false;
+  }
+
+  private notify(): void {
+    const ws = this.watchers;
+    this.watchers = [];
+    for (const w of ws) w();
   }
 
   private async run(ch: Channel, attempt: () => Promise<PubSubResult>, retryUntil: number | undefined): Promise<boolean> {
     for (;;) {
       const at = Math.max(ch.lastAttemptAt + MIN_GAP_MS, ch.notBefore);
       if (retryUntil !== undefined && at > retryUntil) return false;
-      await this.waitUntil(at);
+      await this.waitUntil(ch, at);
       ch.lastAttemptAt = this.clock.now();
       let res: PubSubResult;
       try {
@@ -75,8 +95,12 @@ export class PacingGate {
     }
   }
 
-  private waitUntil(at: number): Promise<void> {
+  private waitUntil(ch: Channel, at: number): Promise<void> {
     if (at <= this.clock.now()) return Promise.resolve();
-    return new Promise((resolve) => { this.clock.setTimer(at, resolve); });
+    return new Promise((resolve) => {
+      ch.parked = true;
+      this.clock.setTimer(at, () => { ch.parked = false; resolve(); });
+      this.notify();
+    });
   }
 }
