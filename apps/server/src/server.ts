@@ -64,7 +64,7 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     const bundles = opts.bundles ?? (await officialBundles());
     const manager = new RoomManager({ store, clock, secrets, bundles, log: opts.log });
     const hub = new Hub();
-    const health = { ready: false };
+    const health: { ready: boolean; closing?: boolean } = { ready: false };
     app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev, health, log: opts.log });
     const running = app;
     const url = opts.port !== undefined ? await app.listen({ port: opts.port, host: opts.host ?? '127.0.0.1' }) : '';
@@ -72,22 +72,45 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     manager.startSweeper();
     health.ready = true;
     const idleTimeoutMs = opts.idleTimeoutMs ?? 15_000;
-    return {
-      app: running, manager, hub, store, secrets, url,
-      async close() {
-        health.ready = false;
-        // 1. Stop accepting requests.
-        await running.close();
-        // 2. Let inputs already in a Room queue finish, but not forever.
+    const log = opts.log;
+
+    async function shutdown(): Promise<void> {
+      health.ready = false;
+      health.closing = true;
+      const deadline = performance.now() + idleTimeoutMs;
+      const until = (ms: number) => {
         let timer: NodeJS.Timeout | undefined;
-        await Promise.race([
-          manager.idle(),
-          new Promise<void>((resolve) => { timer = setTimeout(resolve, idleTimeoutMs); }),
-        ]);
-        clearTimeout(timer);
-        // 3. Unload the Rooms, then close the database.
+        const p = new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), Math.max(0, ms)); });
+        return { p, cancel: () => clearTimeout(timer) };
+      };
+      try {
+        // 1. Stop accepting requests. Requests in flight carry on; their responses close their connections.
+        const appClosed = running.close();
+        appClosed.catch(() => {});
+        // 2. Let inputs already in a Room queue finish, but not forever.
+        const idleWait = until(idleTimeoutMs);
+        const idle = await Promise.race([manager.idle().then(() => 'idle' as const), idleWait.p]);
+        idleWait.cancel();
+        if (idle === 'timeout') log?.('shutdown: rooms still busy after idle timeout', { idleTimeoutMs });
+        // In-flight responses get the rest of the budget, then any connection still open is cut.
+        const rest = until(deadline - performance.now());
+        await Promise.race([appClosed, rest.p]);
+        rest.cancel();
+        running.server.closeAllConnections();
+        await appClosed;
+      } finally {
+        // 3. Unload the Rooms, then close the database, even if closing the HTTP app failed.
         manager.close();
         await store.close();
+      }
+    }
+
+    let closing: Promise<void> | null = null;
+    return {
+      app: running, manager, hub, store, secrets, url,
+      close() {
+        closing ??= shutdown();
+        return closing;
       },
     };
   } catch (e) {
