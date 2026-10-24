@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import type { View } from '@dndm/engine';
 
-export const MAX_BYTES = 5120;
+export const MAX_BYTES = 5000;
 export const BACKLOG_CAP = 3000;
 export const RF_WINDOW = 30_000;
 
@@ -61,7 +61,7 @@ export function buildSnapshot(i: SnapshotInput): Built {
   const party = view.party.map((m) => [i.keyOf(m.id), m.class, m.maxHp > 0 ? Math.round((100 * m.hp) / m.maxHp) : 0, m.knockedOut ? 1 : 0]);
 
   const make = (p: unknown[], pt: number | null, ch: string[] | null): Record<string, unknown> => ({
-    v: 1, e: i.e, t: i.t, ph: view.phase, adv: view.adventure?.id ?? null, f, p,
+    v: 1, e: i.e, t: i.t, ph: view.phase, adv: view.adventure ? { id: view.adventure.id, lined: view.adventure.lined } : null, f, p,
     ...(pt === null ? {} : { pt }),
     rv: i.rv,
     ...(ch === null ? { rf: true } : { ch }),

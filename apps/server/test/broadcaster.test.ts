@@ -13,7 +13,7 @@ const TWITCH_ID = '1001';
 const T = 15_000; // per-test timeout, so a hang fails fast
 
 interface Msg {
-  v: number; e: string; t: number; ph?: string; f?: { n: string } | null; p?: [string, string | null, number, number][];
+  v: number; e: string; t: number; ph?: string; adv?: { id: string; lined: string | null } | null; f?: { n: string } | null; p?: [string, string | null, number, number][];
   pt?: number; rv?: number; ch?: string[]; rf?: true; rw: number; cv: number;
 }
 
@@ -109,6 +109,19 @@ describe('Broadcaster (spec 2b §5.3–§5.5)', () => {
     expect(sent()[0]!.ch).toEqual([key('al')]);
     expect(sent()[0]!.e).toBe(b!.epoch);
     expect(sent()[0]!.rf).toBeUndefined();
+  }, T);
+
+  it('lining up the next adventure node changes adv.lined and sends', async () => {
+    await setup({ before: async () => { await dock({ type: 'openSession' }); await join('al'); } });
+    expect((await dock({ type: 'startAdventure', adventure: 'starter:the-cave' })).ok).toBe(true);
+    await advance(1000);
+    expect(sent().at(-1)!.adv).toEqual({ id: 'starter:the-cave', lined: 'entrance' });
+    const n = sent().length;
+    expect((await dock({ type: 'skipTo', node: 'fork' })).ok).toBe(true);
+    await advance(1000);
+    expect(sent()).toHaveLength(n + 1);
+    expect(sent().at(-1)!.adv).toEqual({ id: 'starter:the-cave', lined: 'fork' });
+    expect(sent().at(-1)!.ch).toEqual([]);
   }, T);
 
   it('at most one send per second', async () => {

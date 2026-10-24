@@ -17,7 +17,7 @@ export const TWITCH_ID = '1001';
 
 /** A PubSub snapshot as parsed from the fake (spec 2b §5.1). */
 export interface Snapshot {
-  v: number; e: string; t: number; ph?: string; adv?: string | null; f?: { n: string } | null;
+  v: number; e: string; t: number; ph?: string; adv?: { id: string; lined: string | null } | null; f?: { n: string } | null;
   p?: [string, string | null, number, number][]; pt?: number; rv?: number; ch?: string[]; rf?: true; rw: number; cv: number;
 }
 

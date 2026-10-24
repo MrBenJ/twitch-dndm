@@ -23,7 +23,7 @@ const bytes = (m: string) => Buffer.byteLength(m, 'utf8');
 
 describe('snapshot (spec 2b §5)', () => {
   it('has the agreed constants', () => {
-    expect([MAX_BYTES, BACKLOG_CAP, RF_WINDOW]).toEqual([5120, 3000, 30_000]);
+    expect([MAX_BYTES, BACKLOG_CAP, RF_WINDOW]).toEqual([5000, 3000, 30_000]);
   });
 
   it('keys are 10 base64url characters, stable, and differ by channel', () => {
@@ -60,11 +60,22 @@ describe('snapshot (spec 2b §5)', () => {
     v.adventure = { id: 'a1', lined: null };
     const m = JSON.parse(buildSnapshot({ ...input, publicView: v }).message);
     expect(m.f).toBeNull();
-    expect(m.adv).toBe('a1');
+    expect(m.adv).toEqual({ id: 'a1', lined: null });
     const v2 = view(baseParty);
     v2.fight!.monster.statuses = [{ status: 'burn', until: 5 }];
     v2.fight!.sub = 'waiting';
     expect(JSON.parse(buildSnapshot({ ...input, publicView: v2 }).message).f).toMatchObject({ st: ['burn'], sub: 'w' });
+  });
+
+  it('adv is the public view\'s adventure object, so lining up the next node changes content', () => {
+    const a = view(baseParty);
+    a.adventure = { id: 'starter:the-cave', lined: 'entrance' };
+    const b = view(baseParty);
+    b.adventure = { id: 'starter:the-cave', lined: 'fork' };
+    const ma = buildSnapshot({ ...input, publicView: a });
+    const mb = buildSnapshot({ ...input, publicView: b });
+    expect(JSON.parse(ma.message).adv).toEqual({ id: 'starter:the-cave', lined: 'entrance' });
+    expect(ma.content).not.toBe(mb.content);
   });
 
   const bigParty = (n: number) => Array.from({ length: n }, (_, i) => member(`twitch:${i}`, 10, 10, false, 'starter:fighter'));
