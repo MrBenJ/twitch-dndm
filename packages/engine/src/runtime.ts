@@ -13,6 +13,8 @@ export class Runtime {
   queue: ReactionJob[] = [];
   depth = 0;
   limitHit = false;
+  /** The audience of the reaction now running; null outside one. */
+  reactionAudience: string[] | null = null;
   pendingEnd: string | null = null;
   inStatModifier = 0;
   readonly formulaCache = new Map<string, FormulaNode>();
@@ -27,7 +29,8 @@ export class Runtime {
   }
 
   emit(type: string, text: string, data: Record<string, unknown> = {}, audience?: string[]): void {
-    this.events.push({ type, at: this.now, text, data, ...(audience ? { audience } : {}) });
+    const aud = audience ?? (this.reactionAudience ? [...this.reactionAudience] : undefined);
+    this.events.push({ type, at: this.now, text, data, ...(aud ? { audience: aud } : {}) });
   }
 
   random(): number {
