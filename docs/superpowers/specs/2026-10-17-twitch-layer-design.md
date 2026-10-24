@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 15)
+**Status:** Draft for owner review (revision 16)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -88,6 +88,7 @@ The Room, RoomManager and Hub keep their 2a jobs. The Room gains the two small a
 - Rev 7 §1.2 said "Any streamer can sign up". 2b's default is invite-only through the allowlist (§4.3), and `DNDM_SIGNUP=open` restores open sign-up.
 - 2a §1.2 and the engine spec put media uploads, the optional chat bot and the paid-pack "official" redefinition in Project 2. Media uploads move to Project 3, the chat bot (with chat bans) becomes its own project after Project 3, and the paid-pack redefinition waits for the first paid pack (§1.2, §11.2). Until media uploads exist, monster images stay as pack content provides them (or none).
 - Rev 7 §7.2 said every own-state change "always produces a snapshot". 2b accepts one exception (§5.3, "a known gap"). A change that was pending when a Room unloaded, at shutdown, or at a crash, and whose send never succeeded, reaches viewers only when that channel's Room next loads (its first send is an `rf`, §5.3). Until then, those viewers catch up when they reopen the extension.
+- A second exception to the same rule: while snapshots don't fit even without `p` and `ch` (§5.4 step 3), the bare `rf` goes out at most once every 30 s, so an own-state change can wait up to 30 s for it.
 - The engine spec (§5.1) said "Signed paid packs come later". 2b's direction (§11.2) is that no signing is needed while packs only come from the official build.
 - 2a left 2b to decide what "watched" means. **Twitch viewers are never watched.** A Twitch viewer's character stays loaded through every other rule in 2a §6.2's "Staying loaded" list: party membership, a running timer, being marked "removed by the streamer" while a session is open with `streamerRemovalWaitsForRest` on, and being "part of an input or a view read in the last 10 minutes". Dev viewers are watched while their WebSocket is open, as in 2a.
 
@@ -115,7 +116,7 @@ Twitch characters are `twitch:<user_id>`, following 2a's rule that character IDs
 - **The channel** is found by matching the JWT's `channel_id` to `channels.twitch_id`. No match answers `unknown-channel` (404) with the message "This streamer hasn't set up the game yet." (rev 7 §8).
 - **With identity shared** (the JWT has `user_id`), the sender is the viewer `twitch:<user_id>`. They may read their own view and send viewer commands as themselves only, under the same rule as 2a's viewer role.
 - **Without identity shared** (only `opaque_user_id`), `/ext/view` returns the public view, the other reads (`/ext/describe`, `/ext/roster`, `/ext/party`) answer as for anyone (§5.6), and every command answers `identity-required` (403), a new error code, so the extension knows to ask the viewer to share their identity.
-- **Rate limits** use 2a's viewer budget (5 per second). The key is the character ID, or the `opaque_user_id` when there's no `user_id`.
+- **Rate limits** use 2a's viewer budget (5 per second). Each viewer's budget is counted per character ID, or per `opaque_user_id` when there's no `user_id`.
 - **The JWT's role.** A `broadcaster` or `moderator` role is treated like any other viewer. Streamer control stays with the dock token in 2b.
 - **CORS.** The `/ext` routes allow the extension's origin, `https://<TWITCH_CLIENT_ID>.ext-twitch.tv`, with the `Authorization` and `Content-Type` headers. Other origins get no CORS headers.
 
@@ -237,7 +238,7 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
 - **An `rf` clears the waiting keys.** A successful `rf` of any kind (§5.3 triggers, the backlog cap, or §5.4's bare fallback) clears every waiting key, because it already tells every viewer to fetch.
 - **The roster version.** The Broadcaster keeps the roster it last computed: each party member's ID, name, class and level, in join order, taken from the public view's party entries. `rv` goes up by one whenever the newly computed roster differs from it. It starts at 1 when a Broadcaster starts. Clients refetch the roster when `rv` or `e` is different from what they hold, after a random delay in `[0, rw]`. Because `e` is new with every Broadcaster, a lost update before a restart can't leave a client holding a roster with a matching `rv`.
 - **Shared reads are cached.** `/ext/roster`, `/ext/describe` and the public view that `/ext/view` gives viewers without identity are the same for every viewer of a channel. The server builds each one once, per (`e`, `rv`), per `cv`, or per Room `inputs` value, and serves that copy to every viewer. These audience-wide fetches are spread by `rw`, but they aren't counted in §5.5's own-state target, because each costs a cache lookup, not a Room read.
-- **When a send is an `rf`.** A Broadcaster's next send is an `rf` whenever one of these is due, and it goes out on the first tick after it becomes due, whether or not anything changed:
+- **When a send is an `rf`.** A Broadcaster's next send is an `rf` whenever one of these is due, and it is built on the first tick after it becomes due, whether or not anything changed, then waits on the pacing gate like any send. If it has to take §5.4's bare form, it skips the bare form's 30 s limit and its "something changed" test:
   - **It's the first Broadcaster for this channel since the process started**, whether at boot or on a later on-demand load. Changes may have been lost across a restart or a crash. This send goes out on its first tick.
   - **The channel's pacing gate has recorded dropped keys.** That can happen before this Broadcaster started, or later, while it runs: an earlier Broadcaster's last send can fail within its 30 s retry. If no Broadcaster is running for the channel, the next one to start makes the `rf`.
   - **The config changed** (`cv` moved, §5.1). A config change can alter every character's own state, loaded or not, so every viewer refetches.
@@ -252,7 +253,7 @@ The snapshot is serialized and measured in bytes. Over 5 KB, in this order:
 
 1. Trim `p` to the first members by join order that fit, and add `pt`.
 2. If it still doesn't fit with `p` empty, keep in `ch` the longest-waiting keys that fit, and carry the rest to the next send (§5.3). The backlog cap (§5.3) turns a growing backlog into an `rf`.
-3. If it still doesn't fit with `ch` empty too (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it. While snapshots keep not fitting (the cause usually lasts, such as a monster name for a whole fight), this bare `rf` goes out at most once every 30 s, and only when something changed since the last one. Viewers' public state can then be up to 30 s old, a known limit (§5.5).
+3. If it still doesn't fit with `ch` empty too (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it. While snapshots keep not fitting (the cause usually lasts, such as a monster name for a whole fight), this bare `rf` goes out at most once every 30 s, and only when something changed since the last one. A due §5.3 `rf` isn't held back by this. Viewers' public state, and notice of their own changes, can then be up to 30 s late, a known limit (§5.5).
 
 In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that gets it keeps its current roster, unless `e` changed, in which case the `e` rule applies (it refetches the roster). It takes the public state (phase, fight, party, adventure) from a `/ext/view` fetch, made after a random delay in `[0, rw]`: its own view with identity, or the cached public view (§5.3) without. Every field other than `v`, `e`, `t`, `rw` and `cv` is optional in the format, and absence means "not in this snapshot", never null.
 
@@ -270,7 +271,7 @@ The server sets it, so it can be tuned without an extension update.
 - **Beyond about 3,000 fetching viewers**, the 30 s cap wins and the rate rises above the target.
 - **Windows overlap.** Each send sizes `rw` from its own keys only, and sends can go out every second. In a long fight where more than 100 keys change every second, the rate follows the number of changed keys per second instead (roughly 300 a second with 3,000 active members, from Attack's 10 s cooldown and monster turns hitting many targets). An `rf` that lands inside another `rf`'s 30 s window doubles the `rf` rate while they overlap.
 - **More changes than fit.** About 365 keys fit in one snapshot. If more keys than that change every second for a long stretch, the backlog grows until it passes the cap, and the channel gets an `rf` every so often.
-- **Snapshots that never fit.** While snapshots don't fit even without `p` and `ch` (§5.4 step 3), a bare `rf` goes out at most once every 30 s, so viewers' public state (fight, party) can be up to 30 s old.
+- **Snapshots that never fit.** While snapshots don't fit even without `p` and `ch` (§5.4 step 3), a bare `rf` goes out at most once every 30 s, so viewers' public state (fight, party), and notice of their own changes, can be up to 30 s late.
 
 An acting viewer's own key stays in `ch` even though their `/ext/commands` answer carried their view, because a timer can change their state again before the next send. The constants live in one place, so they can be tuned.
 
@@ -397,7 +398,7 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
 
 ### 7.7 Runbook
 
-`docs/deploy.md` covers, step by step:
+`docs/deploy.md` is the owner's runbook for the official server, and says so at the top. It isn't a self-hosting guide (§1.3). It covers, step by step:
 
 - **The Twitch developer console** (done by the owner):
   - register the extension;
@@ -461,7 +462,7 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - the unload's last `broadcastState()` runs before the Room closes;
   - at 5 KB (§5.4): trimming `p`, carrying keys that don't fit to the next send, and the bare fallback;
   - more than 3,000 waiting keys (from overflow or failed sends) makes the next send an `rf`; any successful `rf` clears waiting keys;
-  - while snapshots never fit, the bare `rf` goes out at most once every 30 s, and only after a change;
+  - while snapshots never fit, the bare `rf` goes out at most once every 30 s, and only after a change; a config change or dropped-keys `rf` inside that 30 s still goes out;
   - `/ext/roster`, `/ext/party` and `/ext/describe` answer a JWT without `user_id`;
   - the `rw` values;
   - the last tick on unload;
