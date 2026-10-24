@@ -1,0 +1,8 @@
+node_modules
+.git
+**/node_modules
+docs
+.github
+.superpowers
+.claude
+*.tsbuildinfo
