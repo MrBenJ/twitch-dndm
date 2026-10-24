@@ -37,12 +37,21 @@ const plugins = (api: PackApi) => {
     name: 'Back',
     react: { healed: ({ ctx, holder }) => { ctx.emit('tp:back', {}, 'back', { audience: [holder] }); } },
   });
+  api.passive('herald', {
+    name: 'Herald',
+    react: {
+      encounterStarted: ({ ctx }) => { ctx.emit('tp:herald-start', {}, 'start'); },
+      encounterEnded: ({ ctx }) => { ctx.emit('tp:herald-end', {}, 'end'); },
+    },
+  });
 };
 const content = [
   { class: 'echoer', name: 'Echoer', passives: ['echo'] },
   { item: 'echoring', name: 'Echo Ring', slot: 'hand', 'grants-class': 'echoer' },
   { class: 'backer', name: 'Backer', passives: ['back'] },
   { item: 'backring', name: 'Back Ring', slot: 'hand', 'grants-class': 'backer' },
+  { class: 'herald', name: 'Herald', passives: ['herald'] },
+  { item: 'heraldring', name: 'Herald Ring', slot: 'hand', 'grants-class': 'herald' },
 ];
 
 function give(h: ReturnType<typeof harness>, item: string) {
@@ -94,6 +103,18 @@ describe('reaction audiences (spec 2b §5.7)', () => {
     const h = setup('tp:back');
     const evs = h.do({ type: 'respond', character: 'al', input: {} });
     expect(evs.find((e) => e.type === 'tp:back')!.audience).toEqual(['al']);
+  });
+
+  it('reactions to encounterStarted and encounterEnded themselves take the encounter audience', () => {
+    const h = harness({ plugins, content });
+    h.open(); h.join('al'); h.join('bo');
+    give(h, 'tp:heraldring');
+    const started = h.do({ type: 'startEncounter', encounter: { 'tp:hush': {} } }).filter((e) => e.type === 'tp:herald-start');
+    expect(started.length).toBeGreaterThan(0);
+    expect(started.every((e) => JSON.stringify(e.audience) === AB)).toBe(true);
+    const ended = h.do({ type: 'endEncounter' }).filter((e) => e.type === 'tp:herald-end');
+    expect(ended.length).toBeGreaterThan(0);
+    expect(ended.every((e) => JSON.stringify(e.audience) === AB)).toBe(true);
   });
 
   it('a reaction queued outside a restricted encounter stays public', () => {
