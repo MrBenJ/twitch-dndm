@@ -41,6 +41,8 @@ export async function createChannel(o: {
 export interface ServerOpts {
   databaseUrl: string; secret: string; dev?: boolean; port?: number; host?: string;
   clock?: Clock; rateLimits?: boolean; bundles?: PackBundle[];
+  /** How long close() waits for in-flight Room inputs before giving up (default 15 000). */
+  idleTimeoutMs?: number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
 export interface RunningServer {
@@ -55,25 +57,41 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     await store.close();
     throw new Error('Another dndm server is already running against this database');
   }
+  let app: FastifyInstance | undefined;
   try {
     const clock = opts.clock ?? realClock;
     const secrets = new Secrets(opts.secret);
     const bundles = opts.bundles ?? (await officialBundles());
     const manager = new RoomManager({ store, clock, secrets, bundles, log: opts.log });
+    const hub = new Hub();
+    const health = { ready: false };
+    app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev, health, log: opts.log });
+    const running = app;
+    const url = opts.port !== undefined ? await app.listen({ port: opts.port, host: opts.host ?? '127.0.0.1' }) : '';
     await manager.boot();
     manager.startSweeper();
-    const hub = new Hub();
-    const app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev, log: opts.log });
-    const url = opts.port !== undefined ? await app.listen({ port: opts.port, host: opts.host ?? '127.0.0.1' }) : '';
+    health.ready = true;
+    const idleTimeoutMs = opts.idleTimeoutMs ?? 15_000;
     return {
-      app, manager, hub, store, secrets, url,
+      app: running, manager, hub, store, secrets, url,
       async close() {
-        await app.close();
+        health.ready = false;
+        // 1. Stop accepting requests.
+        await running.close();
+        // 2. Let inputs already in a Room queue finish, but not forever.
+        let timer: NodeJS.Timeout | undefined;
+        await Promise.race([
+          manager.idle(),
+          new Promise<void>((resolve) => { timer = setTimeout(resolve, idleTimeoutMs); }),
+        ]);
+        clearTimeout(timer);
+        // 3. Unload the Rooms, then close the database.
         manager.close();
         await store.close();
       },
     };
   } catch (e) {
+    await app?.close().catch(() => {});
     await store.close();
     throw e;
   }
