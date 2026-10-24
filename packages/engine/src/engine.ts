@@ -8,7 +8,7 @@ import { Runtime } from './runtime';
 import { settle } from './settle';
 import { type GameState, isFight, newGameState } from './state';
 import { advanceTo, characterWakeAt, nextWake, resumeAt } from './time';
-import { view, type View } from './view';
+import { type OwnView, ownViews, view, type View } from './view';
 
 export type ApplyResult =
   | { ok: true; game: GameState; events: GameEvent[] }
@@ -25,6 +25,12 @@ export interface Engine {
   resume(game: GameState, now: number): { game: GameState; events: GameEvent[] };
   adopt(game: GameState): GameState;
   view(game: GameState, characterId: string | null, now: number): View;
+  /**
+   * Spec 2b §5.2 (2b decision 18): each id's character, panel and abilities (without targets), as view() gives them,
+   * for many characters on one copy of the game and without building the party. With ignoreCooldowns, `ready` and
+   * `reason` are as if the character had no cooldowns, and `readyAt` is null. An unknown id gets a null character.
+   */
+  ownViews(game: GameState, ids: string[], now: number, opts?: { ignoreCooldowns?: boolean }): Map<string, OwnView>;
   /** The character's earliest timer, or null (spec 2a §6.4). Reads only; doesn't copy the game. */
   characterWake(game: GameState, characterId: string): number | null;
 }
@@ -94,6 +100,11 @@ export function createEngine(opts: { packs: PackBundle[]; channel: unknown }): E
       const rt = new Runtime(registry, structuredClone(game));
       rt.now = Math.max(now, game.clock);
       return view(rt, characterId);
+    },
+    ownViews(game, ids, now, opts) {
+      const rt = new Runtime(registry, structuredClone(game));
+      rt.now = Math.max(now, game.clock);
+      return ownViews(rt, ids, opts);
     },
   };
 }

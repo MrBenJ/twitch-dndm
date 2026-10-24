@@ -86,7 +86,7 @@ describe('room.broadcastState() (spec 2b §5.2)', () => {
     expect((await s.room.broadcastState()).changed.sort()).toEqual(['dev:al', 'dev:bo']);
   });
 
-  it('a public change puts nobody in changed (starter pack)', async () => {
+  it('a public change puts nobody but the actor in changed (starter pack)', async () => {
     s = await roomSetup({ broadcast: true });
     await heldFight(['al', 'bo']);
     await s.room.broadcastState();
@@ -149,6 +149,20 @@ describe('room.broadcastState() (spec 2b §5.2)', () => {
     await s.room.broadcastState();
     expect(s.room.canUnload(s.clock.now())).toBe(true);
   });
+
+  it('one broadcastState pass over 300 party members in a fight stays fast', async () => {
+    s = await roomSetup({ broadcast: true });
+    const names = Array.from({ length: 300 }, (_, i) => `c${i}`);
+    await heldFight(names);
+    await s.room.broadcastState();
+    await s.cmd(s.dock, { type: 'giveGold', target: 'dev:c7', amount: 1 });
+    const t0 = performance.now();
+    const { changed } = await s.room.broadcastState();
+    const ms = performance.now() - t0;
+    expect(changed).toEqual(['dev:c7']);
+    // Measured ~5 ms on the dev machine (~820 ms before the batched engine.ownViews); the bound leaves a wide margin.
+    expect(ms).toBeLessThan(100);
+  }, 60_000);
 
   it('a Room without a Broadcaster refuses broadcastState', async () => {
     s = await roomSetup();

@@ -34,4 +34,21 @@ describe('view', () => {
     h.engine.view(h.game, 'al', 0);
     expect(h.game).toEqual(before);
   });
+
+  it('ownViews gives each character their own part of view, without targets, and leaves the game alone', () => {
+    const h = harness();
+    h.open(); h.join('al'); h.join('mo', 'tp:rod'); h.spawn();
+    h.use('al', 'tp:whack');
+    const before = structuredClone(h.game);
+    const own = h.engine.ownViews(h.game, ['al', 'mo', 'zz'], 1000);
+    expect([...own.keys()]).toEqual(['al', 'mo', 'zz']);
+    for (const id of ['al', 'mo']) {
+      const v = h.engine.view(h.game, id, 1000);
+      expect(own.get(id)).toEqual({ character: v.character, panel: v.panel, abilities: v.abilities.map(({ targets: _t, ...a }) => a) });
+    }
+    expect(own.get('zz')).toEqual({ character: null, panel: { type: 'none' }, abilities: [] });
+    const free = h.engine.ownViews(h.game, ['al'], 1000, { ignoreCooldowns: true }).get('al')!;
+    expect(free.abilities.find((a) => a.ability === 'tp:whack')).toMatchObject({ ready: true, readyAt: null, reason: null });
+    expect(h.game).toEqual(before);
+  });
 });
