@@ -1,4 +1,5 @@
 import type { View } from '@dndm/engine';
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { Secrets } from '../src/crypto';
 import { BACKLOG_CAP, buildSnapshot, keyFor, MAX_BYTES, refreshWindow, RF_WINDOW, type SnapshotInput } from '../src/twitch/snapshot';
@@ -29,6 +30,7 @@ describe('snapshot (spec 2b §5)', () => {
     expect(keyFor(k, 'c1', 'twitch:1')).toBe(keyFor(k, 'c1', 'twitch:1'));
     expect(keyFor(k, 'c1', 'twitch:1')).toMatch(/^[A-Za-z0-9_-]{10}$/);
     expect(keyFor(k, 'c2', 'twitch:1')).not.toBe(keyFor(k, 'c1', 'twitch:1'));
+    expect(keyFor(k, 'c1', 'twitch:1')).toBe(createHmac('sha256', k).update('c1:twitch:1').digest('base64url').slice(0, 10));
     expect(keyFor(k, 'c1', 'dev:al')).toMatch(/^[A-Za-z0-9_-]{10}$/);
   });
 

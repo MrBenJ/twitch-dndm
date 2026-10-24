@@ -29,7 +29,7 @@ export interface Built {
 
 /** A character's anonymous per-channel key: 10 base64url characters of an HMAC (spec 2b §5.1). */
 export function keyFor(k: Buffer, channelId: string, characterId: string): string {
-  return createHmac('sha256', k).update(`${channelId}\n${characterId}`).digest('base64url').slice(0, 10);
+  return createHmac('sha256', k).update(`${channelId}:${characterId}`).digest('base64url').slice(0, 10);
 }
 
 /** How long viewers spread their refreshes over, in ms: 10 ms per key sent, between 1 s and 30 s. */
