@@ -1,10 +1,11 @@
-import { randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { PackBundle } from '@dndm/engine';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Clock } from './clock';
 import type { TwitchConfig } from './config';
 import type { Secrets } from './crypto';
 import type { RoomManager } from './room-manager';
+import { type Room, RoomClosedError } from './room';
 import { createChannel, defaultConfig } from './server';
 import { type Cookies, SESSION_MS } from './session';
 import type { Store } from './store';
@@ -50,7 +51,12 @@ const isUniqueViolation = (e: unknown): boolean => {
 };
 
 /** Streamer sign-up with Twitch (spec 2b §4.3, §6.4, §8). Registered only when Twitch is configured. */
-export function registerSignup(app: FastifyInstance, deps: SignupDeps): void {
+export function registerSignup(root: FastifyInstance, deps: SignupDeps): void {
+  // Encapsulated so the url-encoded parser serves only these pages' forms; 2a routes keep answering 415 to it.
+  root.register(async (app) => signupRoutes(app, deps));
+}
+
+function signupRoutes(app: FastifyInstance, deps: SignupDeps): void {
   // HTML forms post url-encoded bodies (the setup page's forms).
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
     done(null, Object.fromEntries(new URLSearchParams(body as string)));
@@ -101,6 +107,81 @@ export function registerSignup(app: FastifyInstance, deps: SignupDeps): void {
       ])
       .redirect('/setup', 303);
   });
+
+  /** The signed-in session, if its channel still exists and still belongs to the same Twitch account. */
+  const sessionChannel = async (cookie: string | undefined) => {
+    const sess = deps.cookies.readSession(cookie, deps.clock.now());
+    if (!sess) return null;
+    const channel = await deps.store.channel(sess.channelId);
+    return channel && channel.twitchId === sess.twitchId ? channel : null;
+  };
+
+  const signedOut = (res: FastifyReply) =>
+    res.header('set-cookie', deps.cookies.clearSession()).header('cache-control', 'no-store').redirect('/signup', 303);
+
+  app.get('/setup', async (req, res) => {
+    const channel = await sessionChannel(req.headers.cookie);
+    if (!channel) return signedOut(res);
+    const base = deps.config.publicUrl;
+    const dock = deps.secrets.decrypt(channel.dockTokenEnc);
+    const overlay = deps.secrets.decrypt(channel.overlayTokenEnc);
+    const csrf = esc(deps.cookies.csrf(req.headers.cookie) ?? '');
+    const form = (action: string, which: string | null, label: string) =>
+      `<form method="post" action="${action}">${which ? `<input type="hidden" name="which" value="${which}">` : ''}`
+      + `<input type="hidden" name="csrf" value="${csrf}"><button type="submit">${label}</button></form>`;
+    return html(res, 200, 'Setup', [
+      `<h1>${esc(channel.name)}</h1>`,
+      `<p>Dock URL: <code>${esc(`${base}/dock#${dock}`)}</code></p>`,
+      form('/setup/regenerate', 'dock', 'Regenerate dock URL'),
+      `<p>Overlay URL: <code>${esc(`${base}/overlay#${overlay}`)}</code></p>`,
+      form('/setup/regenerate', 'overlay', 'Regenerate overlay URL'),
+      `<p>Connect the CLI: <code>${esc(`dndm connect ${base} --channel ${channel.id} --dock ${dock}`)}</code></p>`,
+      `<p><a href="${esc(`https://dashboard.twitch.tv/extensions/${deps.config.clientId}`)}">Install the extension</a></p>`,
+      form('/signout', null, 'Sign out'),
+    ].join('\n'))
+      .header('referrer-policy', 'no-referrer');
+  });
+
+  app.post('/setup/regenerate', async (req, res) => {
+    const channel = await sessionChannel(req.headers.cookie);
+    if (!channel) return signedOut(res);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!deps.cookies.checkCsrf(req.headers.cookie, body.csrf)) {
+      return html(res, 403, 'Setup', '<p>That form has expired. Reload the page and try again.</p>\n<p><a href="/setup">Back to setup</a></p>');
+    }
+    const which = body.which;
+    if (which !== 'dock' && which !== 'overlay') {
+      return html(res, 400, 'Setup', '<p>Unknown token.</p>\n<p><a href="/setup">Back to setup</a></p>');
+    }
+    const command = { type: which === 'dock' ? 'regenerateDockUrl' : 'regenerateOverlayUrl' } as const;
+    const id = `setup:${randomUUID()}`;
+    let room: Room | null = await deps.manager.get(channel.id);
+    if (!room) return signedOut(res);
+    let answer;
+    try {
+      answer = await room.command({ role: 'dock' }, id, command);
+    } catch (e) {
+      if (!(e instanceof RoomClosedError)) throw e;
+      room = await deps.manager.get(channel.id);
+      if (!room) return signedOut(res);
+      answer = await room.command({ role: 'dock' }, id, command);
+    }
+    if (answer.ok) return res.header('cache-control', 'no-store').redirect('/setup', 303);
+    return html(res, 500, 'Setup', `<p>${esc(answer.error.message)}</p>\n<p><a href="/setup">Back to setup</a></p>`);
+  });
+
+  app.post('/signout', async (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (!deps.cookies.checkCsrf(req.headers.cookie, body.csrf)) {
+      return html(res, 403, 'Sign out', '<p>That form has expired. Reload the page and try again.</p>\n<p><a href="/setup">Back to setup</a></p>');
+    }
+    return signedOut(res);
+  });
+
+  const placeholder = (name: string) => async (_req: unknown, res: FastifyReply) =>
+    html(res, 200, name, `<p>The ${name.toLowerCase()} screen is coming in Project 3.</p>`);
+  app.get('/dock', placeholder('Dock'));
+  app.get('/overlay', placeholder('Overlay'));
 }
 
 /** The account's channel, created on first sign-in. A concurrent sign-in that created it first wins. */

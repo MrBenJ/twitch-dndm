@@ -7,6 +7,7 @@ import { Cookies, SESSION_MS } from '../src/session';
 import { esc, page } from '../src/signup';
 import { freshDb } from './helpers/db';
 import { officialTestBundles, SECRET } from './helpers/room';
+import { setCookies, signIn } from './helpers/signin';
 import { twitchSetup } from './helpers/twitch';
 
 const T = 20_000;
@@ -25,17 +26,6 @@ async function setup(signup?: 'allowlist' | 'open'): Promise<Setup> {
   return s;
 }
 
-async function signIn(x: Setup, user = '77'): Promise<LightMyRequestResponse> {
-  const start = await x.srv.app.inject('/signup/start');
-  const state = new URL(start.headers.location as string).searchParams.get('state')!;
-  const cookie = (start.headers['set-cookie'] as string).split(';')[0]!;
-  return x.srv.app.inject({ url: `/signup/callback?code=${x.fake.codeFor(user)}&state=${state}`, headers: { cookie } });
-}
-
-const setCookies = (res: LightMyRequestResponse): string[] => {
-  const h = res.headers['set-cookie'];
-  return h === undefined ? [] : Array.isArray(h) ? h : [h];
-};
 const sessionOf = (x: Setup, res: LightMyRequestResponse) => {
   const c = setCookies(res).find((v) => v.startsWith('dndm_session='));
   return c ? new Cookies(new Secrets(SECRET)).readSession(c.split(';')[0], x.clock.now()) : null;
