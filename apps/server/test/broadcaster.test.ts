@@ -21,12 +21,16 @@ let s: Awaited<ReturnType<typeof roomSetup>> | null = null;
 let fake: FakeTwitch | null = null;
 let b: Broadcaster | null = null;
 let gate: PacingGate;
+let logs: { msg: string; extra?: Record<string, unknown> }[] = [];
+/** While true, keyOf throws: a stand-in for any throw inside a tick's plan(). */
+let boom = false;
 
 afterEach(async () => {
   b?.stop();
   await s?.done();
   await fake?.close();
   b = null; s = null; fake = null;
+  logs = []; boom = false;
 });
 
 async function setup(o: {
@@ -44,7 +48,8 @@ async function setup(o: {
   await o.before?.();
   const room = s.room;
   b = new Broadcaster({
-    room, twitchId: TWITCH_ID, client, gate, clock: s.clock, keyOf: (id) => keyFor(K, room.channel.id, id),
+    room, twitchId: TWITCH_ID, client, gate, clock: s.clock, keyOf: (id) => { if (boom) throw new Error('boom'); return keyFor(K, room.channel.id, id); },
+    log: (msg, extra) => { logs.push({ msg, ...(extra ? { extra } : {}) }); },
     firstSinceStart: o.first ?? false, ...(o.backlogCap !== undefined ? { backlogCap: o.backlogCap } : {}),
   });
   await b.start();
@@ -122,6 +127,60 @@ describe('Broadcaster (spec 2b §5.3–§5.5)', () => {
     expect(sent()).toHaveLength(n + 1);
     expect(sent().at(-1)!.adv).toEqual({ id: 'starter:the-cave', lined: 'fork' });
     expect(sent().at(-1)!.ch).toEqual([]);
+  }, T);
+
+  it('logs every failed send with status and retryAt, the first delivery, and every delivered rf', async () => {
+    await setup({ before: async () => { await dock({ type: 'openSession' }); } });
+    const pubsubLogs = () => logs.filter((l) => l.msg.startsWith('pubsub'));
+    fake!.failNext('pubsub');
+    await join('al');
+    await advance(1000);
+    expect(pubsubLogs()).toEqual([{ msg: 'pubsub send failed', extra: { twitchId: TWITCH_ID, status: 500, retryAt: null } }]);
+    fake!.rateLimitNext(Math.ceil((s!.clock.now() + 5000) / 1000));
+    await advance(1000);
+    expect(pubsubLogs()).toHaveLength(2);
+    expect(pubsubLogs()[1]).toMatchObject({ msg: 'pubsub send failed', extra: { twitchId: TWITCH_ID, status: 429 } });
+    expect(pubsubLogs()[1]!.extra!.retryAt).toBeGreaterThan(s!.clock.now());
+    await advance(10_000);
+    expect(sent()).toHaveLength(1);
+    expect(pubsubLogs()).toHaveLength(3);
+    expect(pubsubLogs()[2]).toEqual({ msg: 'pubsub send delivered', extra: { twitchId: TWITCH_ID, status: 204, rf: false } });
+    // An ordinary later send isn't logged; an rf is.
+    await join('bo');
+    await advance(1000);
+    expect(sent()).toHaveLength(2);
+    expect(pubsubLogs()).toHaveLength(3);
+    gate.markDropped(TWITCH_ID);
+    await advance(1000);
+    expect(sent()).toHaveLength(3);
+    expect(pubsubLogs()).toHaveLength(4);
+    expect(pubsubLogs()[3]).toEqual({ msg: 'pubsub send delivered', extra: { twitchId: TWITCH_ID, status: 204, rf: true } });
+    expect(JSON.stringify(logs)).not.toMatch(/Bearer|eyJ|"ch"/);
+  }, T);
+
+  it('a tick that throws is logged, rejects nothing, and the next tick sends an rf', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => { unhandled.push(e); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      await setup({ before: async () => { await dock({ type: 'openSession' }); } });
+      boom = true;
+      await join('al');
+      await advance(1000);
+      expect(sent()).toEqual([]);
+      expect(logs.find((l) => l.msg === 'broadcast tick failed')).toMatchObject({ extra: { twitchId: TWITCH_ID, error: 'Error: boom' } });
+      boom = false;
+      await advance(1000);
+      // The failed read's keys may be lost, so they count as dropped: the next send is an rf carrying al.
+      expect(sent()).toHaveLength(1);
+      expect(sent()[0]).toMatchObject({ rf: true, rw: 30_000 });
+      expect(sent()[0]!.p!.map((m) => m[0])).toEqual([key('al')]);
+      expect(gate.hasDropped(TWITCH_ID)).toBe(false);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   }, T);
 
   it('at most one send per second', async () => {

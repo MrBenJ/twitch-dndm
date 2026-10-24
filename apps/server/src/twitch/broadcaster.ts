@@ -57,6 +57,8 @@ export class Broadcaster {
   /** The config version the last rf (or the load) told viewers about. */
   private sentCv = 0;
   private firstPending: boolean;
+  /** Nothing has been delivered by this Broadcaster yet: the first delivery is logged (spec 2b §8). */
+  private neverDelivered = true;
   private lastBareAt = -Infinity;
   private inputsAtBare: number | null = null;
   /** The last snapshot was bare and owed a send that the 30 s throttle held back. */
@@ -87,9 +89,18 @@ export class Broadcaster {
     if (!this.stopped) this.arm(this.d.clock.now() + TICK_MS);
   }
 
+  /**
+   * One tick. Never rejects (the timer fires it with `void`): a throw is logged, and since the read's changed keys may
+   * be lost with it, they count as dropped, so the next tick sends an rf.
+   */
   tick(): Promise<void> {
     if (this.stopped || this.sending || this.ticking) return Promise.resolve();
-    const p = this.runTick().finally(() => { if (this.ticking === p) this.ticking = null; });
+    const p = this.runTick()
+      .catch((e: unknown) => {
+        this.d.gate.markDropped(this.d.twitchId);
+        this.d.log?.('broadcast tick failed', { twitchId: this.d.twitchId, error: String(e) });
+      })
+      .finally(() => { if (this.ticking === p) this.ticking = null; });
     this.ticking = p;
     return p;
   }
@@ -191,8 +202,22 @@ export class Broadcaster {
   /** One send attempt; its bookkeeping finishes before the gate sees the result, so gate.idle() covers it. */
   private attempt(plan: Planned): () => Promise<PubSubResult> {
     return async () => {
-      const res = await this.d.client.sendPubSub(this.d.twitchId, plan.built.message);
-      if (res.ok) this.delivered(plan);
+      const twitchId = this.d.twitchId;
+      let res: PubSubResult;
+      try {
+        res = await this.d.client.sendPubSub(twitchId, plan.built.message);
+      } catch (e) {
+        this.d.log?.('pubsub send failed', { twitchId, status: 0, retryAt: null, error: String(e) });
+        throw e;
+      }
+      if (res.ok) {
+        // Logged: the first delivery and every rf. Never the JWT or the message.
+        if (this.neverDelivered || plan.built.rf) this.d.log?.('pubsub send delivered', { twitchId, status: 204, rf: plan.built.rf });
+        this.neverDelivered = false;
+        this.delivered(plan);
+      } else {
+        this.d.log?.('pubsub send failed', { twitchId, status: res.status, retryAt: res.retryAt });
+      }
       return res;
     };
   }
