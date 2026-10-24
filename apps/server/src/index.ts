@@ -3,3 +3,4 @@ export { Store, type ChannelRow, type RoomRow, type CharacterSave } from './stor
 export { hashToken, newToken, Secrets } from './crypto';
 export { FakeClock, realClock, type Clock } from './clock';
 export { createChannel, defaultConfig, officialBundles, startServer, type RunningServer, type ServerOpts } from './server';
+export { readTwitchConfig, TWITCH_API_BASE, TWITCH_AUTH_BASE, type TwitchConfig } from './config';

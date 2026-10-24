@@ -59,4 +59,25 @@ describe('dndm server (spec 2a §8.1)', () => {
     expect(code).toBe(0);
     expect(out).toMatch(/listening on http:\/\/127\.0\.0\.1:\d+ \(dev login on\)/);
   });
+
+  it('start with a partly configured Twitch refuses and names what is missing', async () => {
+    const r = await cli(['server', 'start', '--port', '0'], { DATABASE_URL: t.url, DNDM_SECRET: SECRET, TWITCH_CLIENT_ID: 'x' });
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('Twitch is partly configured; missing: DNDM_PUBLIC_URL, TWITCH_CLIENT_SECRET, TWITCH_EXTENSION_SECRET, TWITCH_OWNER_ID');
+  });
+
+  it('start warns when DNDM_DEV=1 meets a full Twitch config', async () => {
+    const stdout = new PassThrough();
+    let out = '';
+    stdout.on('data', (c) => { out += String(c); });
+    const code = await main(['server', 'start', '--port', '0'], {
+      stdout, stdin: Readable.from([]), until: Promise.resolve(),
+      env: {
+        DATABASE_URL: t.url, DNDM_SECRET: SECRET, DNDM_DEV: '1', TWITCH_CLIENT_ID: 'c', TWITCH_CLIENT_SECRET: 's',
+        TWITCH_EXTENSION_SECRET: Buffer.from('x').toString('base64'), TWITCH_OWNER_ID: '1', DNDM_PUBLIC_URL: 'https://x.example',
+      },
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('DNDM_DEV=1 with Twitch configured');
+  });
 });

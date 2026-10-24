@@ -11,6 +11,7 @@ const STATUS: Record<string, number> = {
   'bad-command': 400,
   unauthorized: 401,
   forbidden: 403,
+  'identity-required': 403,
   'streamer-only': 403,
   'unknown-channel': 404,
   'stale-config': 409,
@@ -19,6 +20,7 @@ const STATUS: Record<string, number> = {
   'rate-limited': 429,
   internal: 500,
   'save-failed': 503,
+  'twitch-unavailable': 503,
 };
 export function httpStatus(code: string): number {
   return STATUS[code] ?? 200;

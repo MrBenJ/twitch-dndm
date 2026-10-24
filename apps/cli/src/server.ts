@@ -2,7 +2,7 @@ import { randomInt } from 'node:crypto';
 import { resolve } from 'node:path';
 import { formatIssue, ValidationError } from '@dndm/engine';
 import { loadChannel } from '@dndm/pack-loader';
-import { createChannel, defaultConfig, migrate, officialBundles, Secrets, startServer, Store } from '@dndm/server';
+import { createChannel, defaultConfig, migrate, officialBundles, readTwitchConfig, Secrets, startServer, Store } from '@dndm/server';
 import { CliError } from './ids';
 
 export interface ServerCliOpts {
@@ -66,8 +66,11 @@ export async function serverCli(sub: string | undefined, args: string[], o: Serv
       const port = o.port !== undefined ? Number(o.port) : 8787;
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new CliError('--port must be a whole number from 0 to 65535');
       const dev = o.env.DNDM_DEV === '1';
+      let twitch: ReturnType<typeof readTwitchConfig>;
+      try { twitch = readTwitchConfig(o.env); } catch (e) { throw new CliError((e as Error).message); }
+      if (twitch && dev) say('warning', 'DNDM_DEV=1 with Twitch configured: dev login is on');
       const srv = await startServer({
-        databaseUrl: need(o.env, 'DATABASE_URL'), secret: need(o.env, 'DNDM_SECRET'), dev, port, host: o.host,
+        databaseUrl: need(o.env, 'DATABASE_URL'), secret: need(o.env, 'DNDM_SECRET'), dev, port, host: o.host, twitch: twitch ?? undefined,
         log: (msg, extra) => o.write(JSON.stringify({ kind: 'log', text: msg, ...extra })),
       });
       say('note', `dndm server listening on ${srv.url}${dev ? ' (dev login on)' : ''}`, { url: srv.url });

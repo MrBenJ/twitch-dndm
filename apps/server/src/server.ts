@@ -1,3 +1,4 @@
+import type { TwitchConfig } from './config';
 import { join } from 'node:path';
 import { createEngine, type PackBundle } from '@dndm/engine';
 import { listPackDirs, loadChannel, loadPacks, repoRoot } from '@dndm/pack-loader';
@@ -44,6 +45,8 @@ export interface ServerOpts {
   /** How long close() waits for in-flight Room inputs before giving up (default 15 000). */
   idleTimeoutMs?: number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
+  /** Twitch extension settings; used from the Twitch layer onwards. */
+  twitch?: TwitchConfig;
 }
 export interface RunningServer {
   app: FastifyInstance; manager: RoomManager; hub: Hub; store: Store; secrets: Secrets; url: string;
