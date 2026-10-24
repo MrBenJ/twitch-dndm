@@ -6,6 +6,7 @@ import { hashToken, newToken, Secrets } from './crypto';
 import { STATE_VERSION } from './room';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from './app';
+import { registerExt } from './ext';
 import { RateLimiter } from './auth';
 import { type Clock, realClock } from './clock';
 import { Hub } from './hub';
@@ -78,11 +79,9 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     const clock = opts.clock ?? realClock;
     const secrets = new Secrets(opts.secret);
     const bundles = opts.bundles ?? (await officialBundles());
-    const layer = opts.twitch
-      ? new TwitchLayer({
-        config: opts.twitch, client: opts.twitchClient ?? new HttpTwitchClient(opts.twitch, clock), clock, secrets,
-        ...(opts.log ? { log: opts.log } : {}),
-      })
+    const client = opts.twitch ? opts.twitchClient ?? new HttpTwitchClient(opts.twitch, clock) : null;
+    const layer = opts.twitch && client
+      ? new TwitchLayer({ config: opts.twitch, client, clock, secrets, ...(opts.log ? { log: opts.log } : {}) })
       : null;
     const manager = new RoomManager(
       { store, clock, secrets, bundles, log: opts.log, ...(layer ? { broadcast: (c: ChannelRow) => layer.wantsBroadcast(c) } : {}) },
@@ -90,7 +89,11 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     );
     const hub = new Hub();
     const health: { ready: boolean; closing?: boolean } = { ready: false };
-    app = await buildApp({ manager, hub, secrets, limiter: new RateLimiter(clock, opts.rateLimits ?? true), dev: !!opts.dev, health, log: opts.log });
+    const limiter = new RateLimiter(clock, opts.rateLimits ?? true);
+    app = await buildApp({ manager, hub, secrets, limiter, dev: !!opts.dev, health, log: opts.log });
+    if (opts.twitch && layer && client) {
+      registerExt(app, { manager, layer, store, limiter, config: opts.twitch, client, clock, ...(opts.log ? { log: opts.log } : {}) });
+    }
     const running = app;
     const url = opts.port !== undefined ? await app.listen({ port: opts.port, host: opts.host ?? '127.0.0.1' }) : '';
     await manager.boot();
