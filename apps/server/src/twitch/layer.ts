@@ -156,7 +156,8 @@ export class TwitchLayer implements RoomHooks {
 
   /**
    * Spec 2b §7.4 step 3: each Broadcaster's last tick through the pacing gate, one attempt each, waiting at most
-   * `timeoutMs` on the server clock. Whatever is still waiting then is abandoned.
+   * `timeoutMs` on the server clock. Whatever is still waiting then is abandoned: the gate closes, so no send queued
+   * or parked on a timer (an unload's background retries included) starts after this returns.
    */
   async shutdown(timeoutMs: number): Promise<void> {
     this.closed = true;
@@ -178,6 +179,7 @@ export class TwitchLayer implements RoomHooks {
       if (r === 'timeout') this.o.log?.('shutdown: abandoned last sends still waiting', { timeoutMs });
     } finally {
       cancel();
+      this.gate.close();
     }
   }
 

@@ -294,6 +294,20 @@ describe('TwitchLayer (spec 2b §5.3, §7.4)', () => {
     expect(moved).toBeLessThan(11_000);
   }, T);
 
+  it('a last send still parked on a 429 when shutdown gives up never goes out afterwards', async () => {
+    s = await twitchSetup();
+    await s.srv.manager.get(s.channelId); // its first send (an rf) is owed
+    s.fake.rateLimitNext(Math.ceil((s.clock.now() + 60_000) / 1000));
+    await s.advance(1000);
+    expect(failed(s)).toHaveLength(1);
+    const moved = await closeOnClock(s.srv, s.clock);
+    expect(moved).toBeLessThan(11_000);
+    const before = s.attempts.length;
+    await s.clock.advance(120_000, () => new Promise<void>((r) => setImmediate(r)));
+    expect(s.attempts).toHaveLength(before);
+    expect(s.snapshots()).toEqual([]);
+  }, T);
+
   it('shutdown step 3 runs even if closing the HTTP app fails', async () => {
     const x = s = await twitchSetup();
     await x.srv.manager.get(x.channelId);

@@ -253,8 +253,8 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
 The snapshot is serialized and measured in bytes (UTF-8). Over 5 000 bytes, in this order:
 
 1. Trim `p` to the first members by join order that fit, and add `pt`.
-2. If it still doesn't fit with `p` empty, keep in `ch` the longest-waiting keys that fit, and carry the rest to the next send (§5.3). The backlog cap (§5.3) turns a growing backlog into an `rf`.
-3. If it still doesn't fit with `ch` empty too (for example, a very long monster name), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it. While snapshots keep not fitting (the cause usually lasts, such as a monster name for a whole fight), this bare `rf` goes out at most once every 30 s, and only when something changed since the last one. A due §5.3 `rf` isn't held back by this. Viewers' public state, and notice of their own changes, can then be up to 30 s late, a known limit (§5.5).
+2. If it still doesn't fit with `p` empty, keep in `ch` the longest-waiting keys that fit, and carry the rest to the next send (§5.3). If keys are waiting but not even one fits, go to step 3: an empty `ch` would settle nothing and be built again unchanged on every tick. The backlog cap (§5.3) turns a growing backlog into an `rf`.
+3. If it still doesn't fit with `ch` empty too (for example, a very long monster name), or no waiting key fits (step 2), send only `{ "v": 1, "e": …, "t": …, "rf": true, "rw": 30000, "cv": … }` and log it. While snapshots keep not fitting (the cause usually lasts, such as a monster name for a whole fight), this bare `rf` goes out at most once every 30 s, and only when something changed since the last one. A due §5.3 `rf` isn't held back by this. Viewers' public state, and notice of their own changes, can then be up to 30 s late, a known limit (§5.5).
 
 In that bare form, `ph`, `adv`, `f`, `p` and `rv` are missing. A client that gets it keeps its current roster, unless `e` changed, in which case the `e` rule applies (it refetches the roster). It takes the public state (phase, fight, party, adventure) from a `/ext/view` fetch, made after a random delay in `[0, rw]`: its own view with identity, or the cached public view (§5.3) without. Every field other than `v`, `e`, `t`, `rw` and `cv` is optional in the format, and absence means "not in this snapshot", never null.
 
@@ -380,7 +380,7 @@ On SIGTERM, the server:
 
 1. stops accepting requests;
 2. waits up to 15 s for every Room's queue to finish (`manager.idle()`, which fixes 2a's deferred minor);
-3. runs each Broadcaster's last tick through the pacing gate, waiting up to 10 s more. Sends still waiting then are abandoned. After the restart, each channel's first Broadcaster sends an `rf` (§5.3), which closes the gap whenever the Room loads. Shutdown is not an unload, so §5.3's 30 s background retry doesn't apply. Steps 2 and 3 together fit inside Fly's 30 s `kill_timeout`;
+3. runs each Broadcaster's last tick through the pacing gate, waiting up to 10 s more. Sends still waiting then are abandoned: none of them, and no unload's background retry, starts after shutdown returns. After the restart, each channel's first Broadcaster sends an `rf` (§5.3), which closes the gap whenever the Room loads. Shutdown is not an unload, so §5.3's 30 s background retry doesn't apply. Steps 2 and 3 together fit inside Fly's 30 s `kill_timeout`;
 4. closes the Store, which releases the lock.
 
 Fly's `kill_timeout` is 30 s.

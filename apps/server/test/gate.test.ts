@@ -117,6 +117,21 @@ describe('PacingGate', () => {
     expect(idle).toBe(true);
   }, 2000);
 
+  it('close() abandons sends parked on a timer and refuses new ones, without attempting them', async () => {
+    const { clock, gate, times, attempt } = setup();
+    const first = gate.send('1', attempt({ ok: false, status: 429, retryAt: 60_000 }));
+    const parked = gate.send('1', attempt());
+    await clock.advance(1000, flush);
+    expect(times).toEqual([0]);
+    gate.close();
+    expect(await parked).toBe(false);
+    expect(await gate.send('2', attempt())).toBe(false);
+    await clock.advance(120_000, flush);
+    expect(await first).toBe(false);
+    expect(times).toEqual([0]);
+    await gate.idle();
+  });
+
   it('dropped keys are remembered until cleared', () => {
     const { gate } = setup();
     gate.markDropped('1');

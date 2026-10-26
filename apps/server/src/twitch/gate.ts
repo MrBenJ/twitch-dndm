@@ -26,13 +26,19 @@ export class PacingGate {
   private dropped = new Set<string>();
   private watchers: (() => void)[] = [];
 
+  private closed = false;
+  /** Timers sends are parked on, so close() can cancel them and let the sends give up. */
+  private readonly parkedWaits = new Set<{ cancel: () => void; resolve: () => void }>();
+
   constructor(private clock: Clock) {}
 
   /**
    * Queues `attempt` behind this channel's earlier sends. Without `retryUntil` it makes one attempt;
    * with it, it keeps attempting until one succeeds or the next attempt would start after `retryUntil`.
+   * After close() it resolves false without attempting.
    */
   send(twitchId: string, attempt: () => Promise<PubSubResult>, opts: { retryUntil?: number } = {}): Promise<boolean> {
+    if (this.closed) return Promise.resolve(false);
     let ch = this.channels.get(twitchId);
     if (!ch) {
       ch = { tail: Promise.resolve(), lastAttemptAt: -Infinity, notBefore: -Infinity, failures: 0, outstanding: 0, parked: false };
@@ -45,6 +51,15 @@ export class PacingGate {
       .finally(() => { channel.outstanding -= 1; this.notify(); });
     channel.tail = result;
     return result;
+  }
+
+  /**
+   * Shutdown (spec 2b §7.4 step 3): sends not yet attempted give up and resolve false, their timers are cancelled, and
+   * later sends are refused. An attempt already in flight finishes.
+   */
+  close(): void {
+    this.closed = true;
+    for (const w of [...this.parkedWaits]) { w.cancel(); w.resolve(); }
   }
 
   markDropped(twitchId: string): void { this.dropped.add(twitchId); }
@@ -74,8 +89,9 @@ export class PacingGate {
   private async run(ch: Channel, attempt: () => Promise<PubSubResult>, retryUntil: number | undefined): Promise<boolean> {
     for (;;) {
       const at = Math.max(ch.lastAttemptAt + MIN_GAP_MS, ch.notBefore);
-      if (retryUntil !== undefined && at > retryUntil) return false;
+      if (this.closed || (retryUntil !== undefined && at > retryUntil)) return false;
       await this.waitUntil(ch, at);
+      if (this.closed) return false;
       ch.lastAttemptAt = this.clock.now();
       let res: PubSubResult;
       try {
@@ -99,7 +115,12 @@ export class PacingGate {
     if (at <= this.clock.now()) return Promise.resolve();
     return new Promise((resolve) => {
       ch.parked = true;
-      this.clock.setTimer(at, () => { ch.parked = false; resolve(); });
+      const w = {
+        cancel: () => {},
+        resolve: () => { this.parkedWaits.delete(w); ch.parked = false; resolve(); },
+      };
+      this.parkedWaits.add(w);
+      w.cancel = this.clock.setTimer(at, w.resolve);
       this.notify();
     });
   }
