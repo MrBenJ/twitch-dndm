@@ -41,6 +41,17 @@ describe('sign-up with Twitch (spec 2b §4.3, §8)', () => {
     expect(res.body).toContain('Sign in with Twitch');
   }, T);
 
+  it('/ is a minimal page linking to /signup, with the same headers as /signup', async () => {
+    const x = await setup();
+    const res = await x.srv.app.inject('/');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('<h1>dndm</h1>');
+    expect(res.body).toContain('href="/signup"');
+    expect(res.body).not.toMatch(/<script|<link|<img|<iframe/);
+    const signup = await x.srv.app.inject('/signup');
+    for (const h of ['content-type', 'cache-control']) expect(res.headers[h]).toBe(signup.headers[h]);
+  }, T);
+
   it('/signup/start redirects to Twitch with no scopes and a state cookie', async () => {
     const x = await setup();
     const res = await x.srv.app.inject('/signup/start');

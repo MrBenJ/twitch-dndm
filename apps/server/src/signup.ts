@@ -62,6 +62,10 @@ function signupRoutes(app: FastifyInstance, deps: SignupDeps): void {
     done(null, Object.fromEntries(new URLSearchParams(body as string)));
   });
 
+  // A stand-in home page until there's a real one: the game's name and the way in.
+  app.get('/', async (_req, res) =>
+    html(res, 200, 'dndm', '<h1>dndm</h1>\n<p>A co-op Twitch game for the whole audience.</p>\n<p><a href="/signup">Streamers: sign up</a></p>'));
+
   app.get('/signup', async (_req, res) =>
     html(res, 200, 'Sign up', '<h1>dndm</h1>\n<p><a href="/signup/start">Sign in with Twitch</a></p>'));
 
