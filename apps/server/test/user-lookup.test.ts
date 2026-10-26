@@ -35,6 +35,14 @@ const userRequests = () => fake.requests.filter((r) => r.path === '/helix/users'
 const idsOf = (i: number) => [userRequests()[i]!.query.id].flat();
 const user = (n: number): TwitchUser => ({ id: String(n), login: `u${n}`, displayName: `User${n}` });
 const tick = () => new Promise((r) => setTimeout(r, 5));
+/** Waits (real time, up to 2 s) until `cond` holds; real HTTP to the fake can take longer than one tick on CI. */
+async function until(cond: () => boolean): Promise<void> {
+  const end = Date.now() + 2000;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error('condition not met within 2 s');
+    await tick();
+  }
+}
 
 beforeEach(async () => {
   fake = await fakeTwitch();
@@ -177,6 +185,7 @@ describe('UserLookup (batched Get Users by ID)', () => {
     fake.hangNext('users');
     fake.hangNext('users');
     const results = Promise.allSettled(['1', '2', '3'].map((id) => users.lookup(id)));
+    await until(() => userRequests().length >= 2);
     await tick();
     expect(userRequests()).toHaveLength(2);
     const [a, b, c] = await results;
