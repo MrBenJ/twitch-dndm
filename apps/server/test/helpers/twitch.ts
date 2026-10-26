@@ -82,6 +82,7 @@ export async function twitchSetup(o: { serverOpts?: Partial<ServerOpts>; startAt
   const opts = (): ServerOpts => ({
     databaseUrl: t.url, secret: SECRET, clock, rateLimits: true, bundles, twitch,
     twitchClient: recording(new HttpTwitchClient(twitch, clock), clock, attempts),
+    userLookup: { windowMs: 20 }, // a short window keeps joins quick and still batches joins made together
     ...o.serverOpts,
   });
   let srv = await startServer(opts());

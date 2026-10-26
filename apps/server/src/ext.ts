@@ -9,10 +9,13 @@ import type { Store } from './store';
 import { type TwitchClient, TwitchError } from './twitch/api';
 import { verifyExtensionJwt } from './twitch/jwt';
 import type { TwitchLayer } from './twitch/layer';
+import { UserLookup, type UserLookupOpts } from './twitch/users';
 
 export interface ExtDeps {
   manager: RoomManager; layer: TwitchLayer; store: Store; limiter: RateLimiter; config: TwitchConfig; client: TwitchClient;
   clock: Clock;
+  /** Batching and caching of the Get Users lookups for joins (spec 2b §4.2). */
+  users?: UserLookupOpts;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
 
@@ -38,6 +41,7 @@ export function registerExt(app: FastifyInstance, deps: ExtDeps): void {
   const secrets = [deps.config.extensionSecret, ...(deps.config.extensionSecretPrevious ? [deps.config.extensionSecretPrevious] : [])];
   /** Twitch ID → channel ID, once found. A miss isn't kept: the streamer may sign up any time. */
   const channels = new Map<string, string>();
+  const users = new UserLookup(deps.client, deps.clock, deps.users);
 
   void app.register(async (scope) => {
     scope.addHook('onSend', async (req, res, payload) => {
@@ -122,13 +126,14 @@ export function registerExt(app: FastifyInstance, deps: ExtDeps): void {
       let command: Record<string, unknown> & { type: string } = parsed.data.command;
 
       if (command.type === 'join') {
-        // Spec 2b §4.2: the display name comes from Twitch, never from the client. Looked up before the Room's queue.
+        // Spec 2b §4.2: the display name comes from Twitch, never from the client. Looked up (batched, cached) before
+        // the Room's queue.
         const { name: _ignored, ...rest } = command;
         command = rest;
         const userId = sender.character.slice('twitch:'.length);
         let displayName: string | null = null;
         try {
-          displayName = (await deps.client.usersById([userId])).find((u) => u.id === userId)?.displayName ?? null;
+          displayName = (await users.lookup(userId))?.displayName ?? null;
         } catch (e) {
           if (!(e instanceof TwitchError)) throw e;
           deps.log?.('Get Users failed on join', { channel: c.channelId, error: String(e) });

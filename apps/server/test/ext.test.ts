@@ -3,6 +3,7 @@ import { FakeClock } from '../src/clock';
 import { Room } from '../src/room';
 import { startServer } from '../src/server';
 import { HttpTwitchClient, type TwitchUser } from '../src/twitch/api';
+import { UserLookup } from '../src/twitch/users';
 import { freshDb } from './helpers/db';
 import { officialTestBundles, SECRET } from './helpers/room';
 import { twitchSetup } from './helpers/twitch';
@@ -182,6 +183,7 @@ describe('/ext routes (spec 2b §4.1, §4.2, §5.6)', () => {
     expect((await x.ext('POST', '/ext/commands', { jwt: j, body: join('j1') })).json().ok).toBe(true);
     expect((await x.ext('POST', '/ext/commands', { jwt: j, body: { id: 'l1', command: { type: 'leave' } } })).json().ok).toBe(true);
     x.fake.addUser({ id: '42', login: 'viewer42', displayName: 'Renamed' });
+    await x.advance(10 * 60_000); // past the cached name's TTL, so the rejoin asks Twitch
     x.fake.failNext('users');
     const back = await x.ext('POST', '/ext/commands', { jwt: j, body: join('j2', { name: 'Fake' }) });
     expect(back.statusCode).toBe(200);
@@ -195,6 +197,31 @@ describe('/ext routes (spec 2b §4.1, §4.2, §5.6)', () => {
     expect(await x.srv.store.characters(x.channelId, ['twitch:43'])).toEqual([]);
     // Twitch back: the retry works.
     expect((await x.ext('POST', '/ext/commands', { jwt: x.jwt({ user: '43' }), body: join('n2') })).json().ok).toBe(true);
+  }, T);
+
+  it('joins at about the same time share one Get Users request', async () => {
+    const x = await setup();
+    x.fake.addUser({ id: '43', login: 'viewer43', displayName: 'Viewer43' });
+    const [a, b] = await Promise.all([
+      x.ext('POST', '/ext/commands', { jwt: x.jwt({ user: '42' }), body: join('a') }),
+      x.ext('POST', '/ext/commands', { jwt: x.jwt({ user: '43' }), body: join('b') }),
+    ]);
+    expect(a.json()).toMatchObject({ ok: true, view: { character: { name: 'Viewer42' } } });
+    expect(b.json()).toMatchObject({ ok: true, view: { character: { name: 'Viewer43' } } });
+    const gets = x.fake.requests.filter((r) => r.path === '/helix/users');
+    expect(gets).toHaveLength(1);
+    expect([gets[0]!.query.id].flat().sort()).toEqual(['42', '43']);
+  }, T);
+
+  it('a rejoin within the cache TTL reuses the name without asking Twitch', async () => {
+    const x = await setup();
+    const j = x.jwt({ user: '42' });
+    expect((await x.ext('POST', '/ext/commands', { jwt: j, body: join('j1') })).json().ok).toBe(true);
+    expect((await x.ext('POST', '/ext/commands', { jwt: j, body: { id: 'l1', command: { type: 'leave' } } })).json().ok).toBe(true);
+    const before = x.fake.requests.filter((r) => r.path === '/helix/users').length;
+    const back = await x.ext('POST', '/ext/commands', { jwt: j, body: join('j2') });
+    expect(back.json()).toMatchObject({ ok: true, view: { character: { inParty: true, name: 'Viewer42' } } });
+    expect(x.fake.requests.filter((r) => r.path === '/helix/users')).toHaveLength(before);
   }, T);
 
   it('a replayed /ext/commands request gets a fresh view and key', async () => {
@@ -251,10 +278,12 @@ describe('/ext routes (spec 2b §4.1, §4.2, §5.6)', () => {
       await gate;
       return real.call(this, ids);
     });
+    const lookups = vi.spyOn(UserLookup.prototype, 'lookup');
     const j = x.jwt({ user: '42' });
     const a = x.ext('POST', '/ext/commands', { jwt: j, body: join('a') });
     const b = x.ext('POST', '/ext/commands', { jwt: j, body: join('b') });
-    await vi.waitFor(() => expect(calls).toBe(2));
+    await vi.waitFor(() => expect(lookups).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(calls).toBe(1)); // both joins share one Get Users
     release();
     const answers = (await Promise.all([a, b])).map((r) => r.json());
     expect(answers.filter((r) => r.ok)).toHaveLength(1);

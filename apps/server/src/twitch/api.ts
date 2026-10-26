@@ -13,6 +13,14 @@ export class TwitchError extends Error {
   }
 }
 
+/** Twitch answered 429. `retryAt` is its Ratelimit-Reset in ms, when it sent one. */
+export class TwitchRateLimitError extends TwitchError {
+  constructor(message: string, readonly retryAt: number | null) {
+    super(message);
+    this.name = 'TwitchRateLimitError';
+  }
+}
+
 export interface TwitchClient {
   usersById(ids: string[]): Promise<TwitchUser[]>;
   usersByLogin(logins: string[]): Promise<TwitchUser[]>;
@@ -33,6 +41,12 @@ const discard = async (res: Response): Promise<void> => { await res.body?.cancel
 async function reject(res: Response, message: string): Promise<never> {
   await discard(res);
   throw new TwitchError(message);
+}
+/** A 429's Ratelimit-Reset header (Unix seconds) in ms, or null when it's missing or not a number. */
+function resetAt(res: Response): number | null {
+  const header = res.headers.get('ratelimit-reset');
+  const reset = Number(header);
+  return header && Number.isFinite(reset) ? reset * 1000 : null;
 }
 
 export class HttpTwitchClient implements TwitchClient {
@@ -91,6 +105,10 @@ export class HttpTwitchClient implements TwitchClient {
 
   private async users(query: URLSearchParams): Promise<TwitchUser[]> {
     const res = await this.appGet(`/users?${query}`);
+    if (res.status === 429) {
+      await discard(res);
+      throw new TwitchRateLimitError('Twitch Get Users returned 429', resetAt(res));
+    }
     if (!res.ok) await reject(res, `Twitch Get Users returned ${res.status}`);
     return parseUsers(await res.json().catch(() => null));
   }
@@ -148,11 +166,7 @@ export class HttpTwitchClient implements TwitchClient {
       return { ok: false, status: 0, retryAt: null };
     }
     if (res.status === 204) return { ok: true };
-    let retryAt: number | null = null;
-    if (res.status === 429) {
-      const reset = Number(res.headers.get('ratelimit-reset'));
-      if (res.headers.get('ratelimit-reset') && Number.isFinite(reset)) retryAt = reset * 1000;
-    }
+    const retryAt = res.status === 429 ? resetAt(res) : null;
     await discard(res);
     return { ok: false, status: res.status, retryAt };
   }

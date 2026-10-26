@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeClock } from '../src/clock';
 import type { TwitchConfig } from '../src/config';
-import { HttpTwitchClient, TwitchError } from '../src/twitch/api';
+import { HttpTwitchClient, TwitchError, TwitchRateLimitError } from '../src/twitch/api';
 import { fakeTwitch, type FakeTwitch } from './helpers/fake-twitch';
 
 const SECRET = Buffer.from('test-ext-secret').toString('base64');
@@ -152,6 +152,15 @@ describe('HttpTwitchClient', () => {
   it('a failed Get Users throws TwitchError', async () => {
     fake.failNext('users');
     await expect(c.usersById(['1'])).rejects.toBeInstanceOf(TwitchError);
+  });
+
+  it('a 429 from Get Users throws TwitchRateLimitError with retryAt from Ratelimit-Reset', async () => {
+    fake.rateLimitNext(1_800_000_100, 'users');
+    const err = await c.usersById(['1']).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TwitchRateLimitError);
+    expect(err).toBeInstanceOf(TwitchError);
+    expect((err as TwitchRateLimitError).retryAt).toBe(1_800_000_100_000);
+    expect(await c.usersById(['1'])).toHaveLength(1);
   });
 
   it('an unreachable Twitch throws TwitchError', async () => {

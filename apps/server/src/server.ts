@@ -16,6 +16,7 @@ import { RoomManager } from './room-manager';
 import { type ChannelRow, Store } from './store';
 import { HttpTwitchClient, type TwitchClient } from './twitch/api';
 import { TwitchLayer } from './twitch/layer';
+import type { UserLookupOpts } from './twitch/users';
 
 /** Shutdown step 3's budget (spec 2b §7.4). */
 const LAYER_SHUTDOWN_MS = 10_000;
@@ -61,6 +62,8 @@ export interface ServerOpts {
   twitch?: TwitchConfig;
   /** Replaces the HTTP Twitch client (tests). */
   twitchClient?: TwitchClient;
+  /** Overrides the join lookups' batching and cache settings (tests). */
+  userLookup?: UserLookupOpts;
   /** Who may sign up with Twitch (spec 2b §4.3): allowlisted accounts only (the default), or anyone. */
   signup?: SignupMode;
 }
@@ -96,7 +99,10 @@ export async function startServer(opts: ServerOpts): Promise<RunningServer> {
     const limiter = new RateLimiter(clock, opts.rateLimits ?? true);
     app = await buildApp({ manager, hub, secrets, limiter, dev: !!opts.dev, health, log: opts.log });
     if (opts.twitch && layer && client) {
-      registerExt(app, { manager, layer, store, limiter, config: opts.twitch, client, clock, ...(opts.log ? { log: opts.log } : {}) });
+      registerExt(app, {
+        manager, layer, store, limiter, config: opts.twitch, client, clock,
+        ...(opts.userLookup ? { users: opts.userLookup } : {}), ...(opts.log ? { log: opts.log } : {}),
+      });
       registerSignup(app, {
         store, manager, secrets, cookies: new Cookies(secrets), client, config: opts.twitch, signup: opts.signup ?? 'allowlist', bundles,
         clock, ...(opts.log ? { log: opts.log } : {}),

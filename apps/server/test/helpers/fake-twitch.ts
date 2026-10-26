@@ -18,7 +18,8 @@ export interface FakeTwitch {
   codeFor(userId: string): string;
   pubsub(): { broadcasterId: string; message: unknown }[];
   failNext(kind: Kind, times?: number): void;
-  rateLimitNext(resetSec: number): void;
+  /** The next PubSub send (or Get Users, with `kind`) answers 429 with this Ratelimit-Reset, in Unix seconds. */
+  rateLimitNext(resetSec: number, kind?: 'pubsub' | 'users'): void;
   hangNext(kind: 'pubsub' | 'users'): void;
   /** Makes every issued app token fail with 401; `always` keeps failing tokens issued from now on too. */
   revokeAppTokens(opts?: { always?: boolean }): void;
@@ -43,7 +44,7 @@ export async function fakeTwitch(opts: FakeTwitchOptions = {}): Promise<FakeTwit
   let nextApp = 1;
   let revokeAlways = false;
   const failures = new Map<Kind, number>();
-  let rateLimit: number | null = null;
+  const rateLimits = new Map<'pubsub' | 'users', number>();
   const hangs: ('pubsub' | 'users')[] = [];
   const pubsubLog: { broadcasterId: string; message: unknown }[] = [];
   const releases = new Set<() => void>();
@@ -59,6 +60,11 @@ export async function fakeTwitch(opts: FakeTwitchOptions = {}): Promise<FakeTwit
     if (i < 0) return false;
     hangs.splice(i, 1);
     return true;
+  };
+  const takeRateLimit = (k: 'pubsub' | 'users') => {
+    const reset = rateLimits.get(k);
+    rateLimits.delete(k);
+    return reset;
   };
   const hold = () => new Promise<void>((resolve) => { releases.add(resolve); });
 
@@ -102,6 +108,8 @@ export async function fakeTwitch(opts: FakeTwitchOptions = {}): Promise<FakeTwit
 
   app.get('/helix/users', async (req, reply) => {
     if (takeHang('users')) { await hold(); return reply; }
+    const reset = takeRateLimit('users');
+    if (reset !== undefined) return reply.code(429).header('ratelimit-reset', String(reset)).send({ message: 'rate limited' });
     if (takeFailure('users')) return reply.code(500).send({ message: 'boom' });
     if (!clientOk(req.headers['client-id'])) return reply.code(401).send({ message: 'bad client id' });
     const token = bearer(req.headers.authorization);
@@ -124,9 +132,8 @@ export async function fakeTwitch(opts: FakeTwitchOptions = {}): Promise<FakeTwit
 
   app.post('/helix/extensions/pubsub', async (req, reply) => {
     if (takeHang('pubsub')) { await hold(); return reply; }
-    if (rateLimit !== null) {
-      const reset = rateLimit;
-      rateLimit = null;
+    const reset = takeRateLimit('pubsub');
+    if (reset !== undefined) {
       return reply.code(429).header('ratelimit-reset', String(reset)).send({ message: 'rate limited' });
     }
     if (takeFailure('pubsub')) return reply.code(500).send({ message: 'boom' });
@@ -151,7 +158,7 @@ export async function fakeTwitch(opts: FakeTwitchOptions = {}): Promise<FakeTwit
     },
     pubsub: () => pubsubLog,
     failNext: (kind, times = 1) => { failures.set(kind, (failures.get(kind) ?? 0) + times); },
-    rateLimitNext: (resetSec) => { rateLimit = resetSec; },
+    rateLimitNext: (resetSec, kind = 'pubsub') => { rateLimits.set(kind, resetSec); },
     hangNext: (kind) => { hangs.push(kind); },
     revokeAppTokens(o) { appTokens.clear(); if (o?.always) revokeAlways = true; },
     close() {
