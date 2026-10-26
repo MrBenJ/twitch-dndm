@@ -19,7 +19,10 @@ export class RoomManager {
 
   constructor(readonly deps: RoomDeps, private readonly hooks?: RoomHooks) {}
 
-  get(channelId: string): Promise<Room | null> {
+  get(id: string): Promise<Room | null> {
+    // Channel IDs are UUIDs, which the store matches in any case: key the maps by the canonical lowercase form, so an
+    // alias like the uppercase ID finds the same Room instead of loading a second one.
+    const channelId = id.toLowerCase();
     const room = this.loaded.get(channelId);
     if (room && !room.closed) return Promise.resolve(room);
     if (room) this.loaded.delete(channelId);

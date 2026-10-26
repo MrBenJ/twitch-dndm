@@ -93,6 +93,7 @@ export class TwitchLayer implements RoomHooks {
     const channelId = room.channel.id;
     const twitchId = room.channel.twitchId;
     if (twitchId === null) throw new Error(`Channel ${channelId} has no Twitch ID`);
+    this.refuseLiveEntry(channelId);
     const b = new Broadcaster({
       room, twitchId, client: this.o.client, gate: this.gate, clock: this.o.clock,
       keyOf: (id) => this.keyOf(channelId, id),
@@ -110,9 +111,27 @@ export class TwitchLayer implements RoomHooks {
       b.stop();
       throw new Error('The Twitch layer has shut down');
     }
+    try {
+      this.refuseLiveEntry(channelId); // another attach for the channel finished while this one started
+    } catch (e) {
+      b.stop();
+      throw e;
+    }
     // Only a started Broadcaster counts: one that failed to start sent nothing, so the next is still the first.
     this.started.add(channelId);
     this.entries.set(channelId, { room, broadcaster: b });
+  }
+
+  /**
+   * One Broadcaster per channel: replacing a live one would orphan it, still ticking on its own timer. An entry whose
+   * Room has closed outside detach() is stopped and may be replaced.
+   */
+  private refuseLiveEntry(channelId: string): void {
+    const existing = this.entries.get(channelId);
+    if (!existing) return;
+    if (!existing.room.closed) throw new Error(`Channel ${channelId} already has a Broadcaster`);
+    existing.broadcaster.stop();
+    this.entries.delete(channelId);
   }
 
   /**

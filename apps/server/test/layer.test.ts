@@ -116,6 +116,32 @@ describe('TwitchLayer (spec 2b §5.3, §7.4)', () => {
     expect(caches.rosters.has(s.channelId)).toBe(false);
   }, T);
 
+  it('an uppercase UUID alias reaches the same Room and Broadcaster, even unauthenticated; no timer outlives close()', async () => {
+    s = await twitchSetup();
+    const x = s;
+    const room = (await x.srv.manager.get(x.channelId))!;
+    const b = x.srv.layer!.broadcaster(x.channelId)!;
+    const upper = x.channelId.toUpperCase();
+    expect(await x.srv.manager.get(upper)).toBe(room);
+    const anon = await x.srv.app.inject({ method: 'GET', url: `/channels/${upper}/view` });
+    expect(anon.statusCode).toBe(401);
+    expect(x.srv.manager.rooms()).toEqual([room]);
+    expect(x.srv.layer!.broadcaster(x.channelId)).toBe(b);
+    await closeOnClock(x.srv, x.clock);
+    expect(x.clock.pending()).toBe(0);
+  }, T);
+
+  it('attach refuses to replace a channel\'s live Broadcaster', async () => {
+    s = await twitchSetup();
+    const x = s;
+    const room = (await x.srv.manager.get(x.channelId))!;
+    const b = x.srv.layer!.broadcaster(x.channelId)!;
+    await expect(x.srv.layer!.attach(room)).rejects.toThrow(/already has a Broadcaster/);
+    expect(x.srv.layer!.broadcaster(x.channelId)).toBe(b);
+    await closeOnClock(x.srv, x.clock);
+    expect(x.clock.pending()).toBe(0);
+  }, T);
+
   it('an attach still starting when the layer shuts down stops its Broadcaster and fails', async () => {
     s = await twitchSetup();
     const x = s;
