@@ -1,10 +1,12 @@
-import { definePack, type PackBundle } from '@dndm/engine';
+import { definePack, type PackBundle, type View } from '@dndm/engine';
 import { afterEach, describe, expect, it } from 'vitest';
+import { FakeClock } from '../src/clock';
+import type { Room } from '../src/room';
 import type { TwitchConfig } from '../src/config';
 import { HttpTwitchClient } from '../src/twitch/api';
 import { Broadcaster } from '../src/twitch/broadcaster';
 import { PacingGate } from '../src/twitch/gate';
-import { keyFor } from '../src/twitch/snapshot';
+import { buildSnapshot, keyFor } from '../src/twitch/snapshot';
 import { fakeTwitch, type FakeTwitch } from './helpers/fake-twitch';
 import { officialTestBundles, roomSetup } from './helpers/room';
 
@@ -544,4 +546,48 @@ describe('Broadcaster (spec 2b §5.3–§5.5)', () => {
     expect(await send(null)).toBe(true);
     expect(sent()).toEqual([]);
   }, T);
+});
+
+describe('Broadcaster at the snapshot-size boundary (spec 2b §5.4)', () => {
+  it('a private change whose key does not fit beside the public state still reaches viewers, as a bare rf', async () => {
+    const clock = new FakeClock(1_800_000_000_000);
+    const view = (name: string): View => ({
+      phase: 'fight', character: null, abilities: [], panel: { type: 'none' }, overlay: null, adventure: null,
+      party: [{ id: 'twitch:1', name: 'one', class: 'starter:fighter', level: 1, hp: 5, maxHp: 10, knockedOut: false, statuses: [] }],
+      fight: { monster: { name, image: null, hp: 10, maxHp: 10, statuses: [] }, sub: 'fighting', held: true, nextTurnAt: null },
+    });
+    // The longest name for which the public state alone fits: then no key fits beside it.
+    const kOf = (id: string) => keyFor(K, 'c1', id);
+    const fitsWith = (n: number) => !buildSnapshot({
+      e: 'abcdef', t: clock.now(), publicView: view('L'.repeat(n)), keyOf: kOf, rv: 1, cv: 1, waiting: [], rf: false,
+    }).bare;
+    let n = 4000;
+    while (fitsWith(n + 1)) n += 1;
+    const publicView = view('L'.repeat(n - 2));
+    let inputs = 1;
+    let changed: string[] = [];
+    const room = {
+      channel: { id: 'c1', configVersion: 1 },
+      get inputs() { return inputs; },
+      async broadcastState() { const c = changed; changed = []; return { publicView, changed: c, inputs }; },
+    } as unknown as Room;
+    const messages: Msg[] = [];
+    const client = { sendPubSub: async (_id: string, m: string) => { messages.push(JSON.parse(m) as Msg); return { ok: true } as const; } };
+    const g = new PacingGate(clock);
+    const br = new Broadcaster({ room, twitchId: TWITCH_ID, client: client as never, gate: g, clock, keyOf: kOf, firstSinceStart: false });
+    try {
+      await br.start();
+      inputs += 1;
+      changed = ['twitch:7']; // a private-only change: the public view is the same
+      for (let i = 0; i < 5; i++) await clock.advance(1000, () => br.idle());
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({ rf: true, rw: 30_000 });
+      expect(messages[0]!.ch).toBeUndefined();
+      // Delivered: nothing more is owed.
+      await clock.advance(60_000, () => br.idle());
+      expect(messages).toHaveLength(1);
+    } finally {
+      br.stop();
+    }
+  });
 });

@@ -85,7 +85,8 @@ export function buildSnapshot(i: SnapshotInput): Built {
 
   if (chAll !== null) {
     const c = longestPrefix(chAll.length, (k) => fits(make([], party.length, chAll.slice(0, k))));
-    if (c > 0 || fits(make([], party.length, []))) {
+    // Keys are waiting but none fits: an empty ch would settle nothing and repeat forever, so fall to the bare rf.
+    if (c > 0 || (chAll.length === 0 && fits(make([], party.length, [])))) {
       const ch = chAll.slice(0, c);
       return finish(make([], party.length, ch), ch, false);
     }

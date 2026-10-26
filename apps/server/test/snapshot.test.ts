@@ -133,6 +133,18 @@ describe('snapshot (spec 2b §5)', () => {
     expect(bytes(b.message)).toBeLessThanOrEqual(MAX_BYTES);
   });
 
+  it('waiting keys of which not even one fits make the bare rf, not an empty ch', () => {
+    // The longest monster name for which the snapshot with p and ch empty still fits: no room left for a key.
+    const fitsWith = (n: number) => !buildSnapshot({ ...input, waiting: [], publicView: view(baseParty, 'x'.repeat(n)) }).bare;
+    let n = 4000;
+    while (fitsWith(n + 1)) n += 1;
+    expect(JSON.parse(buildSnapshot({ ...input, waiting: [], publicView: view(baseParty, 'x'.repeat(n)) }).message).ch).toEqual([]);
+    const b = buildSnapshot({ ...input, publicView: view(baseParty, 'x'.repeat(n)) });
+    expect(b.bare).toBe(true);
+    expect(b.rf).toBe(true);
+    expect(b.sentKeys).toEqual(input.waiting);
+  });
+
   it('an oversize rf also becomes the bare form', () => {
     const b = buildSnapshot({ ...input, rf: true, publicView: view(baseParty, 'x'.repeat(6000)) });
     expect(b.bare).toBe(true);
