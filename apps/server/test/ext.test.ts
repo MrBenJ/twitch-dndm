@@ -20,8 +20,8 @@ afterEach(async () => {
 
 const join = (id: string, extra: Record<string, unknown> = {}) => ({ id, command: { type: 'join', pick: 'starter:sword', ...extra } });
 
-async function setup(): Promise<Setup> {
-  s = await twitchSetup();
+async function setup(o: Parameters<typeof twitchSetup>[0] = {}): Promise<Setup> {
+  s = await twitchSetup(o);
   s.fake.addUser({ id: '42', login: 'viewer42', displayName: 'Viewer42' });
   expect((await s.dock({ type: 'openSession' })).ok).toBe(true);
   return s;
@@ -200,7 +200,8 @@ describe('/ext routes (spec 2b §4.1, §4.2, §5.6)', () => {
   }, T);
 
   it('joins at about the same time share one Get Users request', async () => {
-    const x = await setup();
+    // A 1 s window: the helper's 20 ms one can split two concurrent joins when the whole suite loads the machine.
+    const x = await setup({ serverOpts: { userLookup: { windowMs: 1000 } } });
     x.fake.addUser({ id: '43', login: 'viewer43', displayName: 'Viewer43' });
     const [a, b] = await Promise.all([
       x.ext('POST', '/ext/commands', { jwt: x.jwt({ user: '42' }), body: join('a') }),
