@@ -16,7 +16,7 @@
 
 - "Twitch is configured" means `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_EXTENSION_SECRET`, `TWITCH_OWNER_ID` and `DNDM_PUBLIC_URL` are all set. Some but not all: refuse to start and name what's missing. None: no `/ext` routes and no Broadcasters (§7.2).
 - The Room never waits on Twitch. PubSub sends run outside the Room's queue (§8).
-- Snapshot: at most 5 KB (`5 * 1024` bytes, measured after `JSON.stringify` as UTF-8). Never contains an event, an encounter panel or an overlay scene (§5.1).
+- Snapshot: at most 5 000 bytes (measured after `JSON.stringify` as UTF-8; the owner confirmed 5 000 over 5 120 on 2026-10-25). Never contains an event, an encounter panel or an overlay scene (§5.1).
 - Keys: the first 10 characters of base64url(HMAC-SHA256(k, channelId + ":" + characterId)), with k derived from `DNDM_SECRET` under its own label (§5.1).
 - Pacing per channel Twitch ID: at most one send per second; a 429 waits until Twitch's `Ratelimit-Reset`; failures back off 1 s, doubling, at most 30 s (§5.3, §6.3, §8).
 - `rw`: changed list → `clamp(keys × 10, 1000, 30000)` ms; `rf` → 30 000 ms (§5.5).
@@ -260,7 +260,7 @@ git commit -m "feat(server): per-channel PubSub pacing gate"
 - Consumes: Plan A's `View` (party `level`, `statuses`).
 - Produces:
   - `Secrets.derive(label: string): Buffer` (the existing `derive(label, secret)`, made public; labels used in 2b: `'snapshot-key'`, `'session'`, `'state'`, `'csrf'`)
-  - `MAX_BYTES = 5120`, `BACKLOG_CAP = 3000`, `RF_WINDOW = 30_000`
+  - `MAX_BYTES = 5000`, `BACKLOG_CAP = 3000`, `RF_WINDOW = 30_000`
   - `keyFor(k: Buffer, channelId: string, characterId: string): string`
   - `refreshWindow(keys: number, rf: boolean): number`
   - `interface SnapshotInput { e: string; t: number; publicView: View; keyOf: (characterId: string) => string; rv: number; cv: number; waiting: string[]; rf: boolean }` (`waiting` = keys, longest-waiting first)
@@ -284,7 +284,7 @@ it('maps the public view, with no events, panel or overlay', () => {
   expect(JSON.parse(b.content)).not.toHaveProperty('t');
   expect(JSON.parse(b.content)).not.toHaveProperty('rw');
 });
-it('a party too big for 5 KB is trimmed by join order and pt gives the full size', () => { /* 3000 members; bytes ≤ 5120; p is a prefix; pt 3000 */ });
+it('a party too big for 5 KB is trimmed by join order and pt gives the full size', () => { /* 3000 members; bytes ≤ 5000; p is a prefix; pt 3000 */ });
 it('keys that do not fit after p is empty are held back, longest-waiting first', () => { /* long monster name so p empties; ch is a prefix of waiting; sentKeys equals it */ });
 it('an rf sends rf: true with no ch and claims every waiting key', () => { /* rf input → m.rf true, m.ch undefined, rw 30000, sentKeys = waiting */ });
 it('a snapshot that does not fit with p and ch empty becomes the bare form', () => {
@@ -292,7 +292,7 @@ it('a snapshot that does not fit with p and ch empty becomes the bare form', () 
   expect(Object.keys(m).sort()).toEqual(['cv', 'e', 'rf', 'rw', 't', 'v']);
   expect(m.rw).toBe(30000);
 });
-it('every built message is at most 5 KB', () => { /* run all cases above, Buffer.byteLength(message) ≤ 5120 */ });
+it('every built message is at most 5 KB', () => { /* run all cases above, Buffer.byteLength(message) ≤ 5000 */ });
 ```
 
 - [ ] **Step 2: Run them and see them fail**

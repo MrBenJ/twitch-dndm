@@ -8,7 +8,7 @@ Project 2b (the Twitch layer) is split into three plans. Run them in order: each
 | B | `2026-10-23-p2b-b-twitch-layer.md` | Twitch config, extension JWTs, the Twitch client and a fake Twitch, the per-channel pacing gate, snapshots, the Broadcaster and `TwitchLayer`, the `/ext` routes, criteria 1 and 2 through `/ext` |
 | C | `2026-10-23-p2b-c-signup-and-deploy.md` | The allowlist (table and CLI), signed cookies, sign-up with Twitch, the setup page, `Dockerfile`, `fly.toml`, the CI image build, `docs/deploy.md` with the live check |
 
-**Spec:** `docs/superpowers/specs/2026-10-17-twitch-layer-design.md` (rev 16, approved). It builds on `2026-10-11-server-core-design.md` (2a) and `2026-10-11-engine-and-packs-design.md`.
+**Spec:** `docs/superpowers/specs/2026-10-17-twitch-layer-design.md` (rev 17; rev 16 was approved, and rev 17 adds the owner's 2026-10-25 decisions below). It builds on `2026-10-11-server-core-design.md` (2a) and `2026-10-11-engine-and-packs-design.md`.
 
 ## Running tests
 
@@ -44,3 +44,10 @@ These are implementation choices, flagged so the owner can overrule them:
 16. **Rate-limit keys for Twitch viewers** are `viewer:<channelId>:twitch:<user_id>`, or `viewer:<channelId>:opaque:<opaque_user_id>` without identity.
 17. **`BroadcasterDeps.backlogCap`** exists only so a test can use a cap of 3 instead of 3 000.
 18. **`engine.ownViews(game, ids, now, { ignoreCooldowns })`** gives many characters' character, panel and abilities (without targets or the party) on one copy of the game, with `ready`/`reason` worked out as if their cooldowns were cleared. Comparison views (§5.2) use it, because two `engine.view` calls per character cloned the whole game and built the full party each time, making every `broadcastState()` pass O(N²) (about 1 s at 300 loaded characters, 10 s at 1 000).
+
+## The owner's decisions (2026-10-25)
+
+19. **Get Users for joins is batched and cached, no longer parked** (spec §4.2, §6.2). `UserLookup` (`apps/server/src/twitch/users.ts`) coalesces lookups for 250 ms or 100 ids, whichever comes first, keeps at most two requests in flight, caches found users for 10 minutes (10 000 at most, least recently used out first), answers a viewer missing from Twitch's answer with "not found" without failing the rest of the batch, and after a 429 fails lookups at once until `Ratelimit-Reset`. Cached names still answer during a 429.
+20. **`MAX_BYTES` is 5 000, not 5 120.** Twitch's limit is "5 KB"; the smaller reading is the safe one. The spec (§5.1, §5.4) and Plan B now say 5 000.
+21. **`ownViews` stays** as described in decision 18.
+22. **`GET /` is a stand-in page**: the game's name, one line and a link to `/signup`, served by the sign-up routes with their headers. Like them, it exists only when Twitch is configured.

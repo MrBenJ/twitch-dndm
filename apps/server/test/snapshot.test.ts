@@ -80,7 +80,7 @@ describe('snapshot (spec 2b §5)', () => {
 
   const bigParty = (n: number) => Array.from({ length: n }, (_, i) => member(`twitch:${i}`, 10, 10, false, 'starter:fighter'));
 
-  it('a party too big for 5 KB is trimmed by join order and pt gives the full size', () => {
+  it('a party too big for MAX_BYTES (5 000) is trimmed by join order and pt gives the full size', () => {
     const party = bigParty(3000);
     const b = buildSnapshot({ ...input, publicView: view(party) });
     const m = JSON.parse(b.message);
@@ -138,7 +138,7 @@ describe('snapshot (spec 2b §5)', () => {
     expect(b.bare).toBe(true);
   });
 
-  it('every built message is at most 5 KB', () => {
+  it('every built message is at most MAX_BYTES (5 000 bytes)', () => {
     const cases: SnapshotInput[] = [
       input,
       { ...input, publicView: view(bigParty(3000)) },

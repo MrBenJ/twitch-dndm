@@ -1,7 +1,7 @@
 # twitch-dndm — Project 2b: Twitch Layer
 
 **Date:** 2026-10-17
-**Status:** Draft for owner review (revision 16)
+**Status:** Draft for owner review (revision 17: the owner's 2026-10-25 decisions on Get Users batching, the 5 000-byte snapshot limit and a `/` page)
 **Roadmap:** `docs/roadmap.md`, Project 2 (2a is done; this is 2b)
 **Builds on:** `2026-10-11-server-core-design.md` (2a, rev 7) and `2026-10-11-engine-and-packs-design.md` (Project 1). Carries over `2026-10-08-core-game-design.md` (rev 7) §7.2, §7.3 and §8, revised for the modular engine and for decisions made in the 2b brainstorm (§1.3).
 
@@ -123,14 +123,15 @@ Twitch characters are `twitch:<user_id>`, following 2a's rule that character IDs
 ### 4.2 Display names
 
 - On every `join` through `/ext/commands`, the server looks the viewer up with Get Users (§6.2) and puts their display name in the engine command's existing `name` field. A `name` sent by the client is ignored.
-- If Get Users fails, a character that already exists joins with their stored name. A character that doesn't exist yet gets `twitch-unavailable` (503), and can retry.
+- **Lookups are batched and cached** (§6.2), so a large audience joining at once doesn't use up the app token's shared rate limit. A rejoin within the cache's 10 minutes uses the cached name and doesn't ask Twitch.
+- If Get Users fails, a character that already exists joins with their stored name. A character that doesn't exist yet gets `twitch-unavailable` (503), and can retry. The same holds when Twitch's answer leaves the viewer out.
 - Names aren't refreshed at any other time, as in rev 7 §8.
 
 ### 4.3 Streamer sign-up
 
 Sign-up is only available when Twitch is configured (§7.2).
 
-1. **`GET /signup`** shows a "Sign in with Twitch" button.
+1. **`GET /signup`** shows a "Sign in with Twitch" button. **`GET /`** is a stand-in page until there's a real one: the game's name, one line about it and a link to `/signup`, served like the other sign-up pages.
 2. The button starts Twitch's OAuth authorization code flow with **no scopes**. A random `state` value goes in the URL and in a signed, `HttpOnly` cookie that lasts 10 minutes.
 3. **`GET /signup/callback`**:
    - Checks that `state` matches the cookie.
@@ -170,7 +171,7 @@ These commands need `DATABASE_URL` and the Twitch client settings. Run against p
 
 ### 5.1 The snapshot
 
-One JSON message per send, to the channel's `broadcast` topic, at most 5 KB. Short field names keep it small:
+One JSON message per send, to the channel's `broadcast` topic, at most 5 000 bytes (Twitch's "5 KB", read as the smaller of 5 000 and 5 120). Short field names keep it small:
 
 ```json
 { "v": 1, "e": "q7Lw2k", "t": 1792287427123,
@@ -249,7 +250,7 @@ The RoomManager starts a Broadcaster for every loaded Room whose channel has a `
 
 ### 5.4 Size
 
-The snapshot is serialized and measured in bytes. Over 5 KB, in this order:
+The snapshot is serialized and measured in bytes (UTF-8). Over 5 000 bytes, in this order:
 
 1. Trim `p` to the first members by join order that fit, and add `pt`.
 2. If it still doesn't fit with `p` empty, keep in `ch` the longest-waiting keys that fit, and carry the rest to the next send (§5.3). The backlog cap (§5.3) turns a growing backlog into an `rf`.
@@ -313,6 +314,12 @@ Comes from the client credentials grant (`TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECR
 Two modes:
 
 - **With the app token**, it looks up users by ID (for display names) or by login (for the allowlist).
+- **Batching for joins.** Lookups by ID for joins (§4.2) go through one batcher per server:
+  - Lookups wait up to 250 ms for others to share a request. A request carries up to 100 `id`s (Helix's limit), and goes at once when 100 are waiting.
+  - At most two requests are in flight; more batches wait for one to finish.
+  - Each join waits for its own answer. A viewer Twitch leaves out of the answer gets "not found", and the rest of the batch is unaffected. A failed request fails only the joins in that batch.
+  - Found users are cached for 10 minutes, at most 10 000 of them, the least recently used going first. "Not found" isn't cached.
+  - A 429 holds every lookup back (failing at once, without a request) until Twitch's `Ratelimit-Reset`, or for 1 s without one, and at most 60 s. Cached names still answer.
 - **With a user token** and no ID or login, it returns that token's owner. Only sign-up uses this mode (§4.3, §6.4).
 
 ### 6.3 Send Extension PubSub Message
@@ -360,7 +367,7 @@ Used only by sign-up (§4.3):
 | `DNDM_SIGNUP` | no | `allowlist` (default) or `open`. |
 | `DNDM_DEV` | no | As in 2a. |
 
-- **"Twitch is configured"** means `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_EXTENSION_SECRET`, `TWITCH_OWNER_ID` and `DNDM_PUBLIC_URL` are all set. `TWITCH_EXTENSION_SECRET_PREVIOUS` is optional and isn't part of this check. With some but not all of them set, the server refuses to start and names what's missing. With none set, there are no `/ext`, `/signup`, `/setup`, `/dock` or `/overlay` routes and no Broadcasters, as in 2a (apart from the four changes in §1.1 criterion 6).
+- **"Twitch is configured"** means `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_EXTENSION_SECRET`, `TWITCH_OWNER_ID` and `DNDM_PUBLIC_URL` are all set. `TWITCH_EXTENSION_SECRET_PREVIOUS` is optional and isn't part of this check. With some but not all of them set, the server refuses to start and names what's missing. With none set, there are no `/`, `/ext`, `/signup`, `/setup`, `/dock` or `/overlay` routes and no Broadcasters, as in 2a (apart from the four changes in §1.1 criterion 6).
 - With Twitch configured and `DNDM_DEV=1`, the server starts and logs a warning on every boot.
 
 ### 7.3 `GET /health`
@@ -440,7 +447,9 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - CORS for the extension origin and not for others;
   - `view` in command answers;
   - a client `name` ignored on `join`;
-  - Get Users failure on `join`, for a new and an existing character.
+  - Get Users failure on `join`, for a new and an existing character;
+  - joins made together sharing one Get Users request, and a rejoin served from the cache.
+- **Get Users batching** (§6.2): flushing on the timer and at 100 ids, cache hits and expiry, the cache's bound, a partial answer, a failure in one batch leaving the other alone, a 429 holding lookups back until its reset, and the in-flight limit.
 - **Room additions:**
   - `changed` includes a loaded character with no open connection whose state changed, and excludes an unchanged one;
   - `broadcastState()` doesn't keep a Room loaded;
@@ -460,7 +469,7 @@ A deploy means a few seconds of downtime for every channel. Clients reconnect an
   - a fight starting puts members whose readiness flips in `changed`, and a cooldown ending alone doesn't;
   - the first Broadcaster for a channel after a restart sends `rf`, at boot or on a later load;
   - the unload's last `broadcastState()` runs before the Room closes;
-  - at 5 KB (§5.4): trimming `p`, carrying keys that don't fit to the next send, and the bare fallback;
+  - at 5 000 bytes (§5.4): trimming `p`, carrying keys that don't fit to the next send, and the bare fallback;
   - more than 3,000 waiting keys (from overflow or failed sends) makes the next send an `rf`; any successful `rf` clears waiting keys;
   - while snapshots never fit, the bare `rf` goes out at most once every 30 s, and only after a change; a config change or dropped-keys `rf` inside that 30 s still goes out;
   - `/ext/roster`, `/ext/party` and `/ext/describe` answer a JWT without `user_id`;

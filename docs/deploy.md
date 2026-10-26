@@ -91,7 +91,7 @@ fly ssh console -C "/app/node_modules/.bin/tsx /app/apps/cli/src/main.ts server 
 
 Or, from a checkout of the repo on your laptop, run `pnpm dndm server allow <login>` with `DATABASE_URL`, `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET` set to the production values. That puts production credentials on the laptop, so prefer the `fly ssh` command. There is no `dndm` binary: it is always `pnpm dndm` from a checkout.
 
-Then open `https://<app>.fly.dev/signup` (there is no page at `/`) and sign in with Twitch.
+Then open `https://<app>.fly.dev/signup` (`/` is a placeholder page that links there) and sign in with Twitch.
 
 ## 5. Rotating secrets
 
