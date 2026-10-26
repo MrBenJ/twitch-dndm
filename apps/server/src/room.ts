@@ -4,6 +4,7 @@ import {
 } from '@dndm/engine';
 import { type Answer, isReadOnlyCommand, isServerCommand, type Role, type ServerCommand, serverCommandSchema } from '@dndm/protocol';
 import type { Clock } from './clock';
+import { comparisonViews } from './comparison';
 import { hashToken, newToken, type Secrets } from './crypto';
 import type { RecentRequest } from './db/schema';
 import type { CharacterSave, ChannelRow, RoomRow, Store } from './store';
@@ -17,7 +18,12 @@ export type RoomOutput =
 export interface RoomDeps {
   store: Store; clock: Clock; secrets: Secrets; bundles: PackBundle[];
   log?: (msg: string, extra?: Record<string, unknown>) => void;
+  /** Whether this channel's Room has a Broadcaster (spec 2b §5.2); asked once, when the Room loads. */
+  broadcast?: (channel: ChannelRow) => boolean;
 }
+
+/** What a Broadcaster reads from a Room (spec 2b §5.2). */
+export interface BroadcastState { publicView: View; changed: string[]; inputs: number }
 
 export const REQUEST_TTL = 5 * 60_000;
 export const IDLE_CHARACTER = 10 * 60_000;
@@ -52,11 +58,21 @@ const requestKey = (s: Sender, id: string) => (s.role === 'viewer' ? `viewer:${s
 /** One channel's live game (spec 2a §6). */
 export class Room {
   lastActivity: number;
+  /** Fixed at load from deps.broadcast. */
+  readonly broadcasting: boolean;
+  /**
+   * Saved inputs so far; read outside the queue (spec 2b §5.2). Counts the saves from commands, timers and config
+   * changes after load; the resume save during Room.load is not counted (the Broadcaster's first broadcastState() is
+   * its baseline).
+   */
+  inputs = 0;
   private queue: Promise<void> = Promise.resolve();
   private saved = new Map<string, string>();
   private touched = new Map<string, number>();
   private watchers = new Map<string, number>();
   private lastViews = new Map<string, string>();
+  /** Each loaded character's comparison view as last recorded (spec 2b §5.2 "When views are recorded"). */
+  private recordedViews = new Map<string, string>();
   private listeners = new Set<(o: RoomOutput) => void>();
   private cancelTimer: (() => void) | null = null;
   private failures = 0;
@@ -71,6 +87,7 @@ export class Room {
     private recent: RecentRequest[],
   ) {
     this.lastActivity = deps.clock.now();
+    this.broadcasting = deps.broadcast?.(channel) ?? false;
   }
 
   /** Spec 2a §6.2 "Loading a Room": the room row, the party, characters with timers, removed ones; then resume. */
@@ -139,6 +156,7 @@ export class Room {
     if (!(await this.save(r.game, [...this.pruned(now), { key, at: now, answer }]))) {
       return fail('save-failed', 'The game could not be saved, so nothing changed. Try again.');
     }
+    this.inputs += 1;
     for (const id of ids) this.touched.set(id, now);
     this.afterInput(r.events, now);
     return answer;
@@ -151,6 +169,27 @@ export class Room {
       await this.ensureLoaded([sender.character]);
       this.touched.set(sender.character, now);
       return this.engine.view(this.game, sender.character, now);
+    });
+  }
+
+  /**
+   * Spec 2b §5.2: the public view, the loaded characters whose comparison view changed since it was last recorded
+   * (recording the current ones), and the input count. Not activity: it leaves lastActivity alone.
+   * With `last`, it is the Room's final read (spec 2b §5.3 "Unloading"): the Room closes in the same queue slot, so every
+   * input queued after it fails with RoomClosedError and retries on a freshly loaded Room.
+   */
+  async broadcastState(opts: { last?: boolean } = {}): Promise<BroadcastState> {
+    if (!this.broadcasting) throw new Error('broadcastState needs a Room with a Broadcaster');
+    return this.run(async () => {
+      if (opts.last) this.close();
+      const now = this.deps.clock.now();
+      const changed: string[] = [];
+      for (const [id, v] of comparisonViews(this.engine, this.game, Object.keys(this.game.characters), now)) {
+        if (this.recordedViews.get(id) === v) continue;
+        this.recordedViews.set(id, v);
+        changed.push(id);
+      }
+      return { publicView: this.engine.view(this.game, null, now), changed, inputs: this.inputs };
     });
   }
 
@@ -208,15 +247,21 @@ export class Room {
   private drop(now: number): void {
     const s = this.game.session;
     const waits = this.engine.registry.settings.streamerRemovalWaitsForRest;
-    for (const [id, ch] of Object.entries(this.game.characters)) {
-      if (s?.party.includes(id)) continue;
-      if (this.engine.characterWake(this.game, id) !== null) continue;
-      if (s && waits && ch.removedByStreamer) continue;
-      if (this.watchers.has(id)) continue;
-      if (now - (this.touched.get(id) ?? 0) < IDLE_CHARACTER) continue;
-      if (this.saved.get(id) !== JSON.stringify(ch)) continue;
+    const candidates = Object.entries(this.game.characters).filter(([id, ch]) => !(
+      s?.party.includes(id)
+      || this.engine.characterWake(this.game, id) !== null
+      || (s && waits && ch.removedByStreamer)
+      || this.watchers.has(id)
+      || now - (this.touched.get(id) ?? 0) < IDLE_CHARACTER
+      || this.saved.get(id) !== JSON.stringify(ch)
+    )).map(([id]) => id);
+    // One batched comparison for all candidates (2b decision 18), worked out before any of them is dropped.
+    const views = this.broadcasting && candidates.length ? comparisonViews(this.engine, this.game, candidates, now) : null;
+    for (const id of candidates) {
+      if (views && this.recordedViews.get(id) !== views.get(id)) continue;
       delete this.game.characters[id];
       this.saved.delete(id);
+      this.recordedViews.delete(id);
       this.touched.delete(id);
     }
   }
@@ -258,6 +303,7 @@ export class Room {
       return;
     }
     this.failures = 0;
+    this.inputs += 1;
     this.afterInput(r.events, now);
   }
 
@@ -313,6 +359,7 @@ export class Room {
       this.deps.log?.('save failed', { channel: this.channel.id, error: String(e) });
       return fail('save-failed', 'The config could not be saved, so nothing changed. Try again.');
     }
+    this.inputs += 1;
     this.engine = next;
     this.channel = { ...this.channel, config, configVersion: version };
     this.recent = recent;
@@ -386,10 +433,16 @@ export class Room {
   }
 
   private add(chars: { id: string }[]): void {
+    const added: string[] = [];
     for (const ch of chars) {
       if (this.game.characters[ch.id]) continue;
       this.game.characters[ch.id] = ch as GameState['characters'][string];
       this.saved.set(ch.id, JSON.stringify(ch));
+      added.push(ch.id);
+    }
+    // One batched comparison for everyone added (2b decision 18).
+    if (this.broadcasting && added.length) {
+      for (const [id, v] of comparisonViews(this.engine, this.game, added, this.deps.clock.now())) this.recordedViews.set(id, v);
     }
   }
 

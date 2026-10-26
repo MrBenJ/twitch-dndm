@@ -12,11 +12,18 @@ const derive = (label: string, secret: string) => createHash('sha256').update(`$
 export class Secrets {
   private readonly key: Buffer;
   private readonly mac: Buffer;
+  private readonly secret: string;
 
   constructor(secret: string) {
     if (secret.length < 16) throw new Error('DNDM_SECRET must be at least 16 characters');
+    this.secret = secret;
     this.key = derive('encrypt', secret);
     this.mac = derive('viewer', secret);
+  }
+
+  /** A key for another purpose, derived from DNDM_SECRET under its own label. */
+  derive(label: string): Buffer {
+    return derive(label, this.secret);
   }
 
   encrypt(text: string): string {

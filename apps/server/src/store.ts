@@ -1,11 +1,13 @@
 import type { Character, SessionState } from '@dndm/engine';
-import { and, eq, inArray, isNotNull, or, sql as dsql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, or, sql as dsql } from 'drizzle-orm';
 import { connect, type Db, type Sql } from './db/connect';
-import { channels, characters, type RecentRequest, rooms } from './db/schema';
+import { allowlist, channels, characters, type RecentRequest, rooms } from './db/schema';
 
 export interface ChannelRow {
   id: string; name: string; config: Record<string, unknown>; configVersion: number;
   dockTokenHash: string; dockTokenEnc: string; overlayTokenHash: string; overlayTokenEnc: string;
+  /** The channel's Twitch broadcaster ID, or null for a channel not on Twitch (spec 2b §3). */
+  twitchId: string | null;
 }
 export interface RoomRow {
   stateVersion: number; clock: number; rng: number; seq: number; session: SessionState | null; recentRequests: RecentRequest[];
@@ -27,11 +29,11 @@ export class Store {
 
   async createChannel(c: {
     name: string; config: Record<string, unknown>; room: RoomRow;
-    dock: { hash: string; enc: string }; overlay: { hash: string; enc: string };
+    dock: { hash: string; enc: string }; overlay: { hash: string; enc: string }; twitchId?: string;
   }): Promise<string> {
     return this.db.transaction(async (tx) => {
       const [row] = await tx.insert(channels).values({
-        name: c.name, config: c.config,
+        name: c.name, config: c.config, twitchId: c.twitchId ?? null,
         dockTokenHash: c.dock.hash, dockTokenEnc: c.dock.enc, overlayTokenHash: c.overlay.hash, overlayTokenEnc: c.overlay.enc,
       }).returning({ id: channels.id });
       await tx.insert(rooms).values({ channelId: row!.id, ...roomValues(c.room) });
@@ -42,6 +44,11 @@ export class Store {
   async channel(id: string): Promise<ChannelRow | null> {
     if (!UUID.test(id)) return null;
     const [row] = await this.db.select().from(channels).where(eq(channels.id, id));
+    return row ? toChannel(row) : null;
+  }
+
+  async channelByTwitchId(twitchId: string): Promise<ChannelRow | null> {
+    const [row] = await this.db.select().from(channels).where(eq(channels.twitchId, twitchId));
     return row ? toChannel(row) : null;
   }
 
@@ -127,6 +134,30 @@ export class Store {
     return [...rows].map((r) => r.channel_id);
   }
 
+  async allow(twitchId: string, login: string): Promise<void> {
+    await this.db.insert(allowlist).values({ twitchId, login })
+      .onConflictDoUpdate({ target: allowlist.twitchId, set: { login } });
+  }
+
+  async disallowById(twitchId: string): Promise<boolean> {
+    const rows = await this.db.delete(allowlist).where(eq(allowlist.twitchId, twitchId)).returning({ id: allowlist.twitchId });
+    return rows.length > 0;
+  }
+
+  async disallowByLogin(login: string): Promise<boolean> {
+    const rows = await this.db.delete(allowlist).where(eq(allowlist.login, login)).returning({ id: allowlist.twitchId });
+    return rows.length > 0;
+  }
+
+  async allowlist(): Promise<{ twitchId: string; login: string; addedAt: Date }[]> {
+    return this.db.select().from(allowlist).orderBy(asc(allowlist.addedAt), asc(allowlist.twitchId));
+  }
+
+  async isAllowed(twitchId: string): Promise<boolean> {
+    const rows = await this.db.select({ id: allowlist.twitchId }).from(allowlist).where(eq(allowlist.twitchId, twitchId));
+    return rows.length > 0;
+  }
+
   /** Spec 2a §6.6: one server per database. Held on a dedicated connection until close(). */
   async tryLock(): Promise<boolean> {
     if (!this.lockConn) this.lockConn = await this.sql.reserve();
@@ -151,5 +182,6 @@ function toChannel(row: typeof channels.$inferSelect): ChannelRow {
   return {
     id: row.id, name: row.name, config: row.config, configVersion: row.configVersion,
     dockTokenHash: row.dockTokenHash, dockTokenEnc: row.dockTokenEnc, overlayTokenHash: row.overlayTokenHash, overlayTokenEnc: row.overlayTokenEnc,
+    twitchId: row.twitchId ?? null,
   };
 }

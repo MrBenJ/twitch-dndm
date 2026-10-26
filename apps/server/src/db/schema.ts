@@ -42,3 +42,10 @@ export const characters = pgTable('characters', {
   index('characters_wake_at').on(t.wakeAt),
   index('characters_removed').on(t.channelId, t.removed),
 ]);
+
+/** Streamers allowed to sign up (spec 2b §3). Keyed by Twitch ID; `login` is for display and for removal after a rename. */
+export const allowlist = pgTable('allowlist', {
+  twitchId: text('twitch_id').primaryKey(),
+  login: text('login').notNull(),
+  addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
+});

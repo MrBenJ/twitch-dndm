@@ -2,7 +2,10 @@ import { randomInt } from 'node:crypto';
 import { resolve } from 'node:path';
 import { formatIssue, ValidationError } from '@dndm/engine';
 import { loadChannel } from '@dndm/pack-loader';
-import { createChannel, defaultConfig, migrate, officialBundles, Secrets, startServer, Store } from '@dndm/server';
+import {
+  createChannel, defaultConfig, HttpTwitchClient, migrate, officialBundles, readTwitchConfig, realClock, Secrets, startServer, Store,
+  TWITCH_API_BASE, TWITCH_AUTH_BASE, TwitchError, type TwitchClient,
+} from '@dndm/server';
 import { CliError } from './ids';
 
 export interface ServerCliOpts {
@@ -10,6 +13,8 @@ export interface ServerCliOpts {
   write: (line: string) => void;
   /** Resolves when `start` should stop. Defaults to SIGINT or SIGTERM. */
   until?: Promise<void>;
+  /** For tests: stands in for the Twitch API in allow and disallow. */
+  twitchClient?: TwitchClient;
 }
 
 function need(env: NodeJS.ProcessEnv, name: 'DATABASE_URL' | 'DNDM_SECRET'): string {
@@ -17,6 +22,23 @@ function need(env: NodeJS.ProcessEnv, name: 'DATABASE_URL' | 'DNDM_SECRET'): str
   if (!v) throw new CliError(name === 'DNDM_SECRET' ? 'set DNDM_SECRET (16+ characters)' : 'set DATABASE_URL (for example postgres://dndm:dndm@localhost:5455/dndm)');
   if (name === 'DNDM_SECRET' && v.length < 16) throw new CliError('DNDM_SECRET must be at least 16 characters');
   return v;
+}
+
+function twitchFor(o: ServerCliOpts): TwitchClient {
+  if (o.twitchClient) return o.twitchClient;
+  const clientId = o.env.TWITCH_CLIENT_ID, clientSecret = o.env.TWITCH_CLIENT_SECRET;
+  if (!clientId || !clientSecret) throw new CliError('set TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET (from your Twitch developer console) to look up Twitch accounts');
+  return new HttpTwitchClient({
+    clientId, clientSecret, extensionSecret: '', extensionSecretPrevious: null, ownerId: '', publicUrl: '',
+    apiBase: TWITCH_API_BASE, authBase: TWITCH_AUTH_BASE,
+  }, realClock);
+}
+
+async function lookup(twitch: TwitchClient, login: string) {
+  try { return (await twitch.usersByLogin([login]))[0] ?? null; } catch (e) {
+    if (e instanceof TwitchError) throw new CliError(`Twitch lookup failed: ${e.message}`);
+    throw e;
+  }
 }
 
 const stopSignal = () => new Promise<void>((done) => {
@@ -66,8 +88,13 @@ export async function serverCli(sub: string | undefined, args: string[], o: Serv
       const port = o.port !== undefined ? Number(o.port) : 8787;
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new CliError('--port must be a whole number from 0 to 65535');
       const dev = o.env.DNDM_DEV === '1';
+      let twitch: ReturnType<typeof readTwitchConfig>;
+      try { twitch = readTwitchConfig(o.env); } catch (e) { throw new CliError((e as Error).message); }
+      const signup = o.env.DNDM_SIGNUP ?? 'allowlist';
+      if (signup !== 'allowlist' && signup !== 'open') throw new CliError('DNDM_SIGNUP must be allowlist or open');
+      if (twitch && dev) say('warning', 'DNDM_DEV=1 with Twitch configured: dev login is on');
       const srv = await startServer({
-        databaseUrl: need(o.env, 'DATABASE_URL'), secret: need(o.env, 'DNDM_SECRET'), dev, port, host: o.host,
+        databaseUrl: need(o.env, 'DATABASE_URL'), secret: need(o.env, 'DNDM_SECRET'), dev, port, host: o.host, twitch: twitch ?? undefined, signup,
         log: (msg, extra) => o.write(JSON.stringify({ kind: 'log', text: msg, ...extra })),
       });
       say('note', `dndm server listening on ${srv.url}${dev ? ' (dev login on)' : ''}`, { url: srv.url });
@@ -75,7 +102,41 @@ export async function serverCli(sub: string | undefined, args: string[], o: Serv
       await srv.close();
       return 0;
     }
+    case 'allow': {
+      const login = args[0]?.toLowerCase();
+      if (!login) throw new CliError('Usage: dndm server allow <login>');
+      const url = need(o.env, 'DATABASE_URL');
+      const user = await lookup(twitchFor(o), login);
+      if (!user) throw new CliError(`No Twitch account is called ${login}`);
+      const store = Store.open(url);
+      try { await store.allow(user.id, user.login); } finally { await store.close(); }
+      say('note', `${user.login} (${user.id}) may now sign up.`, { twitchId: user.id, login: user.login });
+      return 0;
+    }
+    case 'disallow': {
+      const login = args[0]?.toLowerCase();
+      if (!login) throw new CliError('Usage: dndm server disallow <login>');
+      const url = need(o.env, 'DATABASE_URL');
+      const user = await lookup(twitchFor(o), login);
+      const store = Store.open(url);
+      try {
+        const removed = (user && await store.disallowById(user.id)) || await store.disallowByLogin(login);
+        if (!removed) throw new CliError(`${login} isn't on the allowlist`);
+      } finally { await store.close(); }
+      say('note', `${login} removed from the allowlist.`);
+      return 0;
+    }
+    case 'allowlist': {
+      const store = Store.open(need(o.env, 'DATABASE_URL'));
+      try {
+        const rows = await store.allowlist();
+        if (o.json) rows.forEach((r) => o.write(JSON.stringify({ kind: 'allowed', ...r })));
+        else if (!rows.length) o.write('The allowlist is empty.');
+        else rows.forEach((r) => o.write(`${r.login}  ${r.twitchId}  added ${r.addedAt.toISOString()}`));
+      } finally { await store.close(); }
+      return 0;
+    }
     default:
-      throw new CliError('Usage: dndm server <migrate | create-channel <name> | start [--port n]>');
+      throw new CliError('Usage: dndm server <migrate | create-channel <name> | start [--port n] | allow <login> | disallow <login> | allowlist>');
   }
 }

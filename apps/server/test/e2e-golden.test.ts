@@ -1,59 +1,15 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { type Command, createEngine, type GameEvent, type GameState, parseDuration, VIEWER_COMMANDS } from '@dndm/engine';
-import { repoRoot } from '@dndm/pack-loader';
+import { parseDuration } from '@dndm/engine';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeClock } from '../src/clock';
 import { Secrets } from '../src/crypto';
 import { createChannel, defaultConfig, officialBundles, type RunningServer, startServer } from '../src/server';
 import { Store } from '../src/store';
 import { freshDb } from './helpers/db';
+import { direct, type Line, type Out, read, scripts, toId, unprefix } from './helpers/golden';
 import { SECRET } from './helpers/room';
 
-type Line = { wait: string | number } | { next: true } | { as: string; command: Record<string, unknown> & { type: string } };
-type Out = GameEvent | { rejected: string };
-
-const DIR = join(repoRoot(), 'apps', 'cli', 'test', 'golden');
-const scripts = readdirSync(DIR).filter((f) => f.endsWith('.jsonl')).sort();
-const read = (name: string): Line[] => readFileSync(join(DIR, name), 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
-
-/** What `dndm run` does (apps/cli/src/driver.ts), straight through the engine. */
-async function direct(lines: Line[]): Promise<Out[]> {
-  const engine = createEngine({ packs: await officialBundles(), channel: defaultConfig() });
-  let game: GameState = engine.newGame({ seed: 1 });
-  let now = 0;
-  const out: Out[] = [];
-  const advance = () => { const r = engine.advance(game, now); game = r.game; out.push(...r.events); };
-  for (const l of lines) {
-    if ('wait' in l) { now += parseDuration(l.wait); advance(); continue; }
-    if ('next' in l) { const t = engine.nextWakeTime(game); if (t !== null) { now = Math.max(now, t); advance(); } continue; }
-    if (l.as !== 'streamer' && !(VIEWER_COMMANDS as readonly string[]).includes(l.command.type)) { out.push({ rejected: 'streamer-only' }); continue; }
-    const cmd = (l.as === 'streamer' ? l.command : { ...l.command, character: l.as }) as unknown as Command;
-    const r = engine.apply(game, cmd, now);
-    if (r.ok) { game = r.game; out.push(...r.events); } else out.push({ rejected: r.error.code });
-  }
-  return out;
-}
-
-/** A command that names a viewer's character (or targets one) names their server ID, `dev:<name>`. */
-function toDev(c: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...c };
-  if (typeof out.character === 'string') out.character = `dev:${out.character}`;
-  if (typeof out.target === 'string' && out.target !== 'party') out.target = `dev:${out.target}`;
-  const t = out.target as { kind?: string; id?: string } | undefined;
-  if (t && typeof t === 'object' && t.kind === 'character') out.target = { ...t, id: `dev:${t.id}` };
-  const chosen = out.chosen as { kind?: string; id?: string } | null | undefined;
-  if (chosen && chosen.kind === 'character') out.chosen = { ...chosen, id: `dev:${chosen.id}` };
-  return out;
-}
-
-/** Replaces every "dev:<name>" string with "<name>", anywhere in a value. */
-function undev(v: unknown): unknown {
-  if (typeof v === 'string') return v.startsWith('dev:') ? v.slice(4) : v;
-  if (Array.isArray(v)) return v.map(undev);
-  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, undev(x)]));
-  return v;
-}
+const toDev = (c: Record<string, unknown>) => toId(c, 'dev:');
+const undev = (v: unknown) => unprefix(v, 'dev:');
 
 let t: Awaited<ReturnType<typeof freshDb>>;
 let srv: RunningServer;

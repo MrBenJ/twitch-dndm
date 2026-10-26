@@ -6,7 +6,7 @@ import type { Runtime } from './runtime';
 
 export const MAX_DEPTH = 8;
 
-export interface ReactionJob { event: ReactionEvent; ref: EntityRef; role: ReactionRole; depth: number }
+export interface ReactionJob { event: ReactionEvent; ref: EntityRef; role: ReactionRole; depth: number; audience?: string[] }
 
 /** Run pack code; tag unexpected throws with the pack and plugin. */
 export function callPlugin<T>(pack: string, label: string, fn: () => T): T {
@@ -44,7 +44,12 @@ function validResult(point: keyof Modifiers, v: unknown): boolean {
 }
 
 export function react(rt: Runtime, event: ReactionEvent, recipients: { ref: EntityRef; role: ReactionRole }[]): void {
-  for (const r of recipients) rt.queue.push({ event, ref: r.ref, role: r.role, depth: rt.depth + 1 });
+  for (const r of recipients) {
+    rt.queue.push({
+      event, ref: r.ref, role: r.role, depth: rt.depth + 1,
+      ...(rt.reactionAudience ? { audience: [...rt.reactionAudience] } : {}),
+    });
+  }
 }
 
 export function drainReactions(rt: Runtime): void {
@@ -53,13 +58,15 @@ export function drainReactions(rt: Runtime): void {
     if (job.depth > MAX_DEPTH) {
       if (!rt.limitHit) {
         rt.limitHit = true;
-        rt.emit('core:reaction-limit', 'A chain of reactions was stopped', {});
+        rt.emit('core:reaction-limit', 'A chain of reactions was stopped', {}, job.audience);
       }
       continue;
     }
     if (!entityExists(rt, job.ref)) continue;
     const prev = rt.depth;
+    const prevAudience = rt.reactionAudience;
     rt.depth = job.depth;
+    rt.reactionAudience = job.audience ?? null;
     try {
       for (const h of holders(rt, job.ref)) {
         const fn = h.hooks.react?.[job.event.type] as ((info: unknown) => void) | undefined;
@@ -69,6 +76,7 @@ export function drainReactions(rt: Runtime): void {
       }
     } finally {
       rt.depth = prev;
+      rt.reactionAudience = prevAudience;
     }
   }
 }

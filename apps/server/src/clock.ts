@@ -56,6 +56,11 @@ export class FakeClock implements Clock {
     await settle();
   }
 
+  /** How many timers are armed and not yet fired or cancelled. */
+  pending(): number {
+    return this.timers.length;
+  }
+
   advance(ms: number, settle?: () => Promise<void>): Promise<void> {
     return this.advanceTo(this.t + ms, settle);
   }

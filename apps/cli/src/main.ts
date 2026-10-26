@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 import { ValidationError, formatIssue, parseDuration } from '@dndm/engine';
 import { LoadError } from '@dndm/pack-loader';
 import { CliError } from './ids';
+import type { TwitchClient } from '@dndm/server';
 import { validate } from './validate';
 
 const USAGE = `Usage: dndm <command> [options]
@@ -14,6 +15,9 @@ Commands:
   sim --party <classes> --vs <monster> [--runs n] [--seed n] [--reaction 1s-3s] [--max-time 30m]
   server migrate                                                   apply database migrations
   server create-channel <name> [--config file] [--seed n]          create a channel; prints its tokens
+  server allow <login>                                             let a Twitch streamer sign up (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET)
+  server disallow <login>                                          take a streamer off the allowlist (TWITCH_CLIENT_ID and TWITCH_CLIENT_SECRET)
+  server allowlist                                                 list who may sign up
   server start [--port 8787] [--host 127.0.0.1]                    run the server (DATABASE_URL, DNDM_SECRET, DNDM_DEV=1)
   connect <url> --channel <id> (--dock <token> | --viewer <name>) [--script file.jsonl] [--timeout 30s]
                                                                    play against a running server
@@ -22,7 +26,7 @@ Every command takes --json (one JSON object per line).`;
 
 export async function main(
   argv: string[],
-  io: { stdout: Writable; stdin: Readable; env?: NodeJS.ProcessEnv; until?: Promise<void> } = { stdout: process.stdout, stdin: process.stdin },
+  io: { stdout: Writable; stdin: Readable; env?: NodeJS.ProcessEnv; until?: Promise<void>; twitchClient?: TwitchClient } = { stdout: process.stdout, stdin: process.stdin },
 ): Promise<number> {
   const out = (line: string) => io.stdout.write(`${line}\n`);
   let parsed;
@@ -95,7 +99,7 @@ export async function main(
         const { serverCli } = await import('./server');
         return await serverCli(rest[0], rest.slice(1), {
           env: io.env ?? process.env, json: values.json, port: values.port, host: values.host, config: values.config,
-          seed: seedGiven ? seed : undefined, write: out, until: io.until,
+          seed: seedGiven ? seed : undefined, write: out, until: io.until, twitchClient: io.twitchClient,
         });
       }
       default:

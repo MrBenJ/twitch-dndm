@@ -1,0 +1,22 @@
+app = "dndm-CHANGEME"        # the runbook replaces this with dndm-<6 random hex characters>
+primary_region = "CHANGEME"
+kill_signal = "SIGTERM"
+kill_timeout = 30
+
+[deploy]
+  release_command = "node_modules/.bin/tsx apps/cli/src/main.ts server migrate"
+  strategy = "rolling"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "10s"
+    timeout = "5s"
+    grace_period = "30s"

@@ -11,6 +11,12 @@ import type { RoomManager } from './room-manager';
 
 export interface AppDeps {
   manager: RoomManager; hub: Hub; secrets: Secrets; limiter: RateLimiter; dev: boolean;
+  /**
+   * `/health` answers 503 until `ready` turns true (set once boot has finished). Omitted means always ready. Once
+   * `closing` turns true (shutdown), every response asks the client to close its connection, so a kept-alive
+   * connection doesn't hold the server open after its last request.
+   */
+  health?: { ready: boolean; closing?: boolean };
   /** How long a WebSocket may stay silent before its hello (README decision 7). */
   helloTimeoutMs?: number;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
@@ -41,6 +47,17 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     if (!deps.limiter.take(who.role, limitKey(room, who))) { reply(res, fail('rate-limited', 'Too many requests; slow down')); return null; }
     return { room, who, error: null };
   }
+
+  app.addHook('onSend', async (req, res, payload) => {
+    if (deps.health?.closing && req.raw.httpVersionMajor < 2) res.header('connection', 'close');
+    return payload;
+  });
+
+  // No token and no rate limit: load balancers and uptime checks call this.
+  app.get('/health', async (_req, res) => {
+    const ready = deps.health?.ready ?? true;
+    return res.code(ready ? 200 : 503).send({ ok: ready });
+  });
 
   app.post('/channels/:channel/commands', async (req: ChannelReq, res) => {
     const body = commandRequestSchema.safeParse(req.body);
